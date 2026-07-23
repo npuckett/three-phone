@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>three-phone</title>
+  <link rel="stylesheet" href="styles/main.css?v=three-1">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="scripts/api-data.js?v=three-1" defer></script>
+  <script src="scripts/examples-data.js?v=three-1" defer></script>
+  <script src="scripts/catalog-filters.js?v=three-1" defer></script>
+  <script src="scripts/render.js?v=three-1" defer></script>
+  <script src="scripts/card-expand.js" defer></script>
+  <script src="scripts/navigation.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="mobile-header">
+    <a class="brand compact" href="#start" aria-label="three-phone docs home">
+      <span class="brand-title"><span>Three</span><span>Phone</span></span>
+    </a>
+    <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-sidebar" data-menu-button>Menu</button>
+  </header>
+
+  <aside class="sidebar" id="site-sidebar" data-sidebar>
+    <div class="sidebar-inner">
+      <a class="brand" href="#start" aria-label="three-phone docs home">
+        <span class="brand-title"><span>Three</span><span>Phone</span></span>
+      </a>
+      <p class="sidebar-summary">Mobile hardware access for three.js scenes.</p>
+      <nav class="sidebar-nav" aria-label="Docs sections">
+        <a href="#start">Start</a>
+        <a href="#quick-start">Quick Start</a>
+        <a href="#agent-skills">Agent Skills</a>
+        <div class="nav-group">
+          <a href="#api">API</a>
+          <div class="nav-subheads" aria-label="API subsections">
+            <a href="#api-core">Core Setup</a>
+            <a href="#api-motion">Motion Sensors</a>
+            <a href="#api-touch">Touch &amp; Picking</a>
+            <a href="#api-audio">Audio</a>
+            <a href="#api-camera">Camera</a>
+            <a href="#api-nfc">NFC</a>
+            <a href="#api-geo">GPS</a>
+            <a href="#api-ble">Bluetooth (BLE)</a>
+            <a href="#api-vibration">Vibration</a>
+            <a href="#api-torch">Torch / Flashlight</a>
+            <a href="#api-debug">Debug</a>
+            <a href="#api-status">Status</a>
+          </div>
+        </div>
+        <div class="nav-group">
+          <a href="#examples">Examples</a>
+          <div class="nav-subheads" aria-label="Example categories">
+            <a href="#examples-start">Start</a>
+            <a href="#examples-input">Input</a>
+            <a class="nav-subitem" href="#examples-input-touch">Touch</a>
+            <a class="nav-subitem" href="#examples-input-movement">Movement</a>
+            <a class="nav-subitem" href="#examples-input-microphone">Microphone</a>
+            <a class="nav-subitem" href="#examples-input-speech">Speech</a>
+            <a class="nav-subitem" href="#examples-input-ble">BLE</a>
+            <a class="nav-subitem" href="#examples-input-nfc">NFC</a>
+            <a class="nav-subitem" href="#examples-input-gps">GPS</a>
+            <a class="nav-subitem" href="#examples-input-camera">Camera + ML5</a>
+            <a href="#examples-output">Output</a>
+            <a class="nav-subitem" href="#examples-output-sound">Sound</a>
+            <a class="nav-subitem" href="#examples-output-vibration">Vibration</a>
+            <a class="nav-subitem" href="#examples-output-torch">Torch</a>
+            <a class="nav-subitem" href="#examples-output-ble">BLE</a>
+            <a href="#examples-reference">Reference</a>
+            <a class="nav-subitem" href="#examples-reference-ui-styles">UI Styles</a>
+            <a class="nav-subitem" href="#examples-reference-combined">Combined</a>
+          </div>
+        </div>
+        <a href="#compatibility">Compatibility</a>
+      </nav>
+      <div class="sidebar-actions">
+        <a href="https://npuckett.github.io/p5-phone/examples/homepage/" target="_blank" rel="noreferrer">p5-phone (p5.js) ↗</a>
+        <a href="../../README.md">README</a>
+        <a href="https://github.com/npuckett/three-phone" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="backdrop" data-backdrop></div>
+
+  <main id="main-content" class="main-content">
+    <section id="start" class="hero-section content-section">
+      <figure class="hero-media">
+        <div class="hero-image" style="display:flex;align-items:center;justify-content:center;min-height:220px;color:#2a184a;font-weight:800;letter-spacing:2px;font-size:clamp(28px,6vw,64px);text-transform:uppercase;">three · phone</div>
+        <figcaption class="image-credit">Companion to <a href="https://npuckett.github.io/p5-phone/" target="_blank" rel="noreferrer">p5-phone</a>, for three.js.</figcaption>
+      </figure>
+      <div class="signal-grid" aria-label="Docs priorities">
+        <div>
+          <strong>Static</strong>
+          <span>No framework, no build step, GitHub Pages friendly.</span>
+        </div>
+        <div>
+          <strong>Phone-first</strong>
+          <span>Every runnable example keeps a QR code.</span>
+        </div>
+        <div>
+          <strong>Current API</strong>
+          <span>Reference data is checked against <code>src/three-phone.js</code>.</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="quick-start" class="content-section">
+      <div class="section-heading">
+        <span class="eyebrow">Start</span>
+        <h2>Quick Start</h2>
+        <p>Load three-phone as a plain script, load three.js with an import map, then a tiny loader makes <code>THREE</code> global and runs your sketch. Lock gestures and enable the capability your sketch needs from a user tap.</p>
+      </div>
+      <div class="quickstart-snippets">
+        <article>
+          <h3>The three-phone + three.js head</h3>
+          <pre><code>&lt;!-- three-phone: plain script, window globals --&gt;
+&lt;script src="https://cdn.jsdelivr.net/npm/three-phone@0.1.0/dist/three-phone.min.js"&gt;&lt;/script&gt;
+
+&lt;!-- three.js via import map --&gt;
+&lt;script type="importmap"&gt;
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/" } }
+&lt;/script&gt;
+
+&lt;!-- loader: expose THREE, then run sketch.js (a plain script) --&gt;
+&lt;script type="module"&gt;
+  import * as THREE from 'three';
+  window.THREE = THREE;
+  const s = document.createElement('script');
+  s.src = 'sketch.js';
+  document.body.appendChild(s);
+&lt;/script&gt;</code></pre>
+        </article>
+      </div>
+      <pre><code>// sketch.js
+let renderer, scene, camera, cube;
+
+function init() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
+  camera.position.z = 5;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1));
+  cube = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.6, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x8b5cf6 }));
+  scene.add(cube);
+
+  showDebug();
+  setPhoneCanvas(renderer);
+  enableGyroTap('Tap to enable motion sensors');
+  lockGestures();
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (window.sensorsEnabled) applyDeviceRotation(cube, { smooth: 0.8 });
+  else cube.rotation.y += 0.01;
+  renderer.render(scene, camera);
+}
+
+init();</code></pre>
+
+      <div class="note-band">
+        <strong>Permission pattern:</strong> put code that uses phone hardware inside a positive enabled check — <code>if (window.sensorsEnabled) { ... }</code>, <code>if (window.micEnabled) { ... }</code>, or the matching status flag for the capability you enabled.
+      </div>
+
+      <div class="starter-grid" aria-label="Positive permission examples">
+        <article class="starter-card">
+          <h3>Motion Sensors</h3>
+          <pre><code>if (window.sensorsEnabled) {
+  applyDeviceRotation(mesh, { smooth: 0.8 });
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Touch Picking</h3>
+          <pre><code>function touchStarted() {
+  const rc = getTouchRaycaster(mouseX, mouseY, camera);
+  const hit = rc.intersectObjects(meshes)[0];
+  if (hit) hit.object.material.color.set(0x8b5cf6);
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Microphone</h3>
+          <pre><code>if (window.micEnabled) {
+  const level = getMicLevel(); // 0..1
+  blob.scale.setScalar(1 + level * 2);
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Sound (three.js audio)</h3>
+          <pre><code>function userSetupComplete() {
+  if (!window.soundEnabled) return;
+  const sound = new THREE.Audio(listener);
+  const osc = listener.context.createOscillator();
+  osc.start(); sound.setNodeSource(osc);
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Camera</h3>
+          <pre><code>cam = createPhoneCamera('user', true, 'cover');
+cam.onReady(() => scene.add(cam.createBackgroundMesh()));
+enableCameraTap();</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Bluetooth (BLE)</h3>
+          <pre><code>bleSetup({
+  characteristics: [
+    { name: 'temp', type: 'float', notify: true }
+  ]
+});
+enableBleTap();
+
+function bleReceive(name, value) {
+  debug(name + ' = ' + value);
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Vibration</h3>
+          <pre><code>function touchStarted() {
+  if (window.vibrationEnabled) vibrate(50);
+}</code></pre>
+        </article>
+
+        <article class="starter-card">
+          <h3>Multiple Types</h3>
+          <pre><code>enablePermissionsTap(['sensors', 'mic'], 'Tap to enable motion + mic');
+
+if (window.sensorsEnabled &amp;&amp; window.micEnabled) {
+  applyDeviceRotation(mesh, { smooth: 0.8 });
+  mesh.scale.setScalar(1 + getMicLevel() * 2);
+}</code></pre>
+        </article>
+      </div>
+
+      <div class="note-band">
+        <strong>Script order matters:</strong> load <code>three-phone.js</code> first, then the import map, then the loader module. The loader sets <code>window.THREE</code> before it injects <code>sketch.js</code>, so your sketch can use the global <code>THREE</code> without being a module.
+      </div>
+    </section>
+
+    <section id="agent-skills" class="content-section">
+      <div class="section-heading">
+        <span class="eyebrow">Tooling</span>
+        <h2>Agent Skills</h2>
+        <p>An optional skill teaches AI coding assistants how three-phone works, so generated sketches use the right permission flow, motion globals, and three.js helpers. See <a href="https://github.com/npuckett/three-phone/blob/main/SKILL.md">SKILL.md</a>.</p>
+      </div>
+      <div class="compat-grid">
+        <article class="compat-panel">
+          <h3>three-phone</h3>
+          <p>Knowledge of the library API, the permission model, the motion/touch globals, and the three.js integration helpers (applyDeviceRotation, getTouchRaycaster, PhoneCamera).</p>
+        </article>
+        <article class="compat-panel">
+          <h3>p5-phone</h3>
+          <p>Building the same ideas with p5.js instead of three.js? The <a href="https://npuckett.github.io/p5-phone/" target="_blank" rel="noreferrer">p5-phone</a> library shares this exact permission API.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="api" class="content-section">
+      <div class="section-heading">
+        <span class="eyebrow">Reference</span>
+        <h2>API</h2>
+        <p>Grouped by the job you are doing. The permission table keeps the five UI styles visible; each category lists the three-phone functions and the three.js APIs they pair with.</p>
+      </div>
+      <div id="permission-matrix" class="matrix-wrap" aria-live="polite"></div>
+      <div id="api-sections" class="api-sections" aria-live="polite"></div>
+    </section>
+
+    <section id="examples" class="content-section">
+      <div class="section-heading">
+        <span class="eyebrow">Examples</span>
+        <h2>Example Catalog</h2>
+        <p>Each example is a self-contained three.js sketch designed to show off 3D — lighting, materials, shadows, raycasting, spatial audio. Every card links to its source and, where one exists, its p5.js twin. Scan the QR to open on a phone.</p>
+      </div>
+      <div class="filter-panel" aria-label="Example filters">
+        <label>Search <input id="example-search" type="search" placeholder="motion, NFC, face, sound"></label>
+        <label>Subcategory <select id="category-filter"></select></label>
+        <label>Level <select id="level-filter"></select></label>
+        <label>three.js <select id="version-filter"></select></label>
+        <label>Platform <select id="platform-filter"></select></label>
+        <label>Tag <select id="tag-filter"></select></label>
+      </div>
+      <div class="catalog-status" id="catalog-status"></div>
+      <div id="example-results" class="example-results" aria-live="polite"></div>
+    </section>
+
+    <section id="compatibility" class="content-section">
+      <div class="section-heading">
+        <span class="eyebrow">Support</span>
+        <h2>Compatibility</h2>
+        <p>Plan mobile sketches by platform first. Browser permissions and hardware support matter more than the three.js version for most phone behavior.</p>
+      </div>
+
+      <div class="compat-grid">
+        <article class="compat-panel">
+          <h3>iOS Safari</h3>
+          <ul>
+            <li>Motion sensors, microphone, sound, speech, and camera must start from a user tap or button.</li>
+            <li>Motion permission uses Apple-specific sensor prompts, so the enable helpers are important.</li>
+            <li>Web NFC, torch, and vibration are not available in Safari on iPhone.</li>
+            <li>Video textures need <code>playsinline muted</code> and a post-gesture <code>play()</code> — PhoneCamera handles this.</li>
+          </ul>
+        </article>
+
+        <article class="compat-panel">
+          <h3>Android Chrome</h3>
+          <ul>
+            <li>Motion sensors usually work without the iOS-style sensor permission prompt.</li>
+            <li>Microphone, sound, speech, and camera still need a user gesture and browser permission.</li>
+            <li>Web NFC, torch, and vibration are Android Chrome features (NFC/BLE require HTTPS).</li>
+            <li>Web Bluetooth works in Chrome/Edge; on iOS use the Bluefy browser.</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Capability</th><th>iOS Safari</th><th>Android Chrome</th><th>Desktop browsers</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>three.js / WebGL</td><td>Supported.</td><td>Supported.</td><td>Supported.</td></tr>
+            <tr><td>Motion sensors</td><td>Supported after a tap permission flow.</td><td>Supported; permission request is usually a no-op.</td><td>Limited or unavailable on most laptops and desktops.</td></tr>
+            <tr><td>Touch / picking</td><td>Supported through pointer events.</td><td>Supported through pointer events.</td><td>Use the mouse for testing (touches has one entry).</td></tr>
+            <tr><td>Microphone and sound</td><td>Supported after user gesture and permission.</td><td>Supported after user gesture and permission.</td><td>Supported after browser permission.</td></tr>
+            <tr><td>Speech recognition</td><td>Browser support varies; test on device.</td><td>Supported where Web Speech is available.</td><td>Browser support varies.</td></tr>
+            <tr><td>NFC</td><td>Not supported.</td><td>Supported in Chrome on HTTPS.</td><td>Not supported.</td></tr>
+            <tr><td>GPS / geolocation</td><td>Supported on HTTPS after a tap.</td><td>Supported on HTTPS after a tap.</td><td>Supported after browser permission.</td></tr>
+            <tr><td>Camera and ML5</td><td>Supported after camera permission.</td><td>Supported after camera permission.</td><td>Supported after camera permission.</td></tr>
+            <tr><td>Vibration</td><td>Not supported.</td><td>Supported on many phones.</td><td>Limited or unavailable.</td></tr>
+            <tr><td>Torch / flashlight</td><td>Not supported.</td><td>Supported on many phones.</td><td>Not supported.</td></tr>
+            <tr><td>Bluetooth (BLE)</td><td>Bluefy browser only.</td><td>Supported in Chrome on HTTPS.</td><td>Chrome/Edge on HTTPS.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
