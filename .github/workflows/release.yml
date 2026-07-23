@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+
+    - name: Install dependencies
+      run: npm install --only=dev 2>/dev/null || echo "No dependencies to install"
+
+    - name: Run tests
+      run: npm test
+
+    - name: Build library
+      run: npm run build
+
+    - name: Validate files
+      run: |
+        echo "Validating release files..."
+        ls -la src/ dist/
+        test -f src/three-phone.js
+        test -f dist/three-phone.min.js
+        echo "All required files exist ✓"
+
+  create-release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body: |
+          Changes in this release — see CHANGELOG.md for details.
+
+          ## CDN usage
+
+          Release tag: `${{ github.ref_name }}`
+
+          Replace `VERSION` with the npm version (the tag without the leading `v`, e.g. `0.1.0`):
+
+          ```html
+          <!-- three-phone: plain script, window globals -->
+          <script src="https://cdn.jsdelivr.net/npm/three-phone@VERSION/dist/three-phone.min.js"></script>
+
+          <!-- three.js via import map -->
+          <script type="importmap">
+          { "imports": {
+              "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+              "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/" } }
+          </script>
+
+          <!-- loader: expose THREE, then run sketch.js -->
+          <script type="module">
+            import * as THREE from 'three';
+            window.THREE = THREE;
+            const s = document.createElement('script');
+            s.src = 'sketch.js';
+            document.body.appendChild(s);
+          </script>
+          ```
+
+          Interactive examples: https://npuckett.github.io/three-phone/examples/homepage/
+        draft: false
+        prerelease: false
