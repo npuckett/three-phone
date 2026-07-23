@@ -21,6 +21,7 @@
     "release:minor": "npm version minor",
     "release:major": "npm version major",
     "release:dry": "npm version --dry-run",
+    "publish:token": "bash scripts/publish.sh",
     "serve:docs": "http-server . -p 8765 -c-1",
     "serve:cors": "http-server . -p 8876 --cors -c-1"
   },
