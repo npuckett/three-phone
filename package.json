@@ -1,0 +1,84 @@
+{
+  "name": "three-phone",
+  "version": "0.1.0",
+  "description": "Simplified mobile hardware access for three.js - handle motion sensors, microphone, touch, camera, and browser gestures with ease. Companion to p5-phone.",
+  "main": "src/three-phone.js",
+  "files": [
+    "src/",
+    "dist/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npx terser src/three-phone.js --compress --mangle --output dist/three-phone.min.js && cp src/three-phone.js dist/three-phone.js",
+    "test": "echo \"(contract tests are added in later commits)\" && exit 0",
+    "prepublishOnly": "npm run build",
+    "prepare": "npm run build",
+    "postversion": "git push && git push --tags",
+    "release:patch": "npm version patch",
+    "release:minor": "npm version minor",
+    "release:major": "npm version major",
+    "release:dry": "npm version --dry-run",
+    "serve:docs": "http-server . -p 8765 -c-1",
+    "serve:cors": "http-server . -p 8876 --cors -c-1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/npuckett/three-phone.git"
+  },
+  "keywords": [
+    "threejs",
+    "three",
+    "mobile",
+    "permissions",
+    "touch",
+    "gyroscope",
+    "accelerometer",
+    "microphone",
+    "gesture-blocking",
+    "mobile-web",
+    "creative-coding",
+    "webgl",
+    "javascript",
+    "ios",
+    "android",
+    "deviceorientation",
+    "devicemotion",
+    "geolocation",
+    "gps",
+    "webxr"
+  ],
+  "author": "Nick Puckett",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/npuckett/three-phone/issues"
+  },
+  "homepage": "https://github.com/npuckett/three-phone#readme",
+  "peerDependencies": {
+    "three": ">=0.160.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "terser": "^5.44.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "browserslist": [
+    "iOS >= 13",
+    "Android >= 7",
+    "Chrome >= 80",
+    "Safari >= 13",
+    "Firefox >= 75"
+  ]
+}

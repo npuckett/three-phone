@@ -1,0 +1,30 @@
+# Development files
+.github/
+.git/
+*.log
+node_modules/
+
+# Documentation kept minimal in the npm tarball (README ships; the rest lives on GitHub)
+CONTRIBUTING.md
+CHANGELOG.md
+SKILL.md
+test-*.js
+test-*.html
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep these in the package:
+# src/
+# dist/
+# examples/
+# README.md
+# LICENSE
+# package.json
