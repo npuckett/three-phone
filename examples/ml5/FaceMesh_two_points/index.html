@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>three-phone · ml5 FaceMesh (two points)</title>
+  <style>html, body { margin: 0; height: 100%; overflow: hidden; background: #0e0b16; }</style>
+  <script src="../../../dist/three-phone.js"></script>
+  <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+  <script src="../ml5-loading.js"></script>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'three';
+    window.THREE = THREE;
+    for (const src of ['../ml5-common.js', 'sketch.js']) {
+      await new Promise((res) => { const s = document.createElement('script'); s.src = src; s.onload = res; document.body.appendChild(s); });
+    }
+  </script>
+</body>
+</html>
