@@ -72,6 +72,8 @@ const expected = new Set([
   'stopGeo', 'setGeoOptions', 'getGeoPosition', 'geoDistance', 'geoInPolygon',
   // BLE
   'isBleSupported', 'bleSetup', 'bleConnect', 'bleDisconnect', 'bleRead', 'bleWrite',
+  // Audio
+  'getAudioContext', 'getMicLevel', 'getMicStream',
   // Camera
   'createPhoneCamera',
   // Motion thresholds + three.js helpers

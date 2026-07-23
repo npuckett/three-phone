@@ -176,6 +176,15 @@ const _BLE_VALID_TYPES = new Set([
 // The three.js renderer canvas three-phone binds gestures / canvas-touch to.
 let _phoneCanvas = null;
 
+// Web Audio state (mic metering + audio-context unlock). p5-phone leans on
+// p5.sound; three-phone uses the Web Audio API directly and resumes THREE's
+// shared audio context so THREE.Audio / PositionalAudio work after the gesture.
+let _audioContext = null;
+let _micStream = null;
+let _micAnalyser = null;
+let _micData = null;
+let _micRafId = null;
+
 const _gestureLockState = {
   locked: false,
   mode: null,
@@ -1275,21 +1284,138 @@ async function _requestMotionPermissionsCore() {
   }
 }
 
-// The following feature cores are implemented in later build commits:
-//   mic-level + sound + speech (Web Audio) and the PhoneCamera engine.
-// Each stub sets its enabled flag so the enable matrix and status globals work.
+// =========================================
+// AUDIO: microphone level + sound/speech unlock (Web Audio)
+// =========================================
+
+/**
+ * Get (lazily create) the shared Web Audio AudioContext three-phone uses.
+ * Returns null if the browser has no Web Audio support.
+ */
+function getAudioContext() {
+  if (!_audioContext) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    _audioContext = new AC();
+  }
+  return _audioContext;
+}
+
+// Resume three-phone's context AND three.js's shared audio context (if present),
+// so THREE.Audio/PositionalAudio start after the user gesture.
+async function _resumeAudioContext() {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (e) { /* ignore */ }
+  }
+  if (window.THREE && window.THREE.AudioContext &&
+      typeof window.THREE.AudioContext.getContext === 'function') {
+    try {
+      const tctx = window.THREE.AudioContext.getContext();
+      if (tctx && tctx.state === 'suspended') await tctx.resume();
+    } catch (e) { /* ignore */ }
+  }
+  return ctx;
+}
+
+/**
+ * Current microphone input level, 0..1 (RMS). Read this in your animate loop.
+ */
+function getMicLevel() {
+  return window.micLevel;
+}
+
+/**
+ * The live microphone MediaStream (for THREE.AudioAnalyser, ml5, etc.), or null.
+ */
+function getMicStream() {
+  return _micStream;
+}
+
+function _startMicLevelLoop() {
+  if (_micRafId) return;
+  const tick = () => {
+    if (_micAnalyser && _micData) {
+      _micAnalyser.getByteTimeDomainData(_micData);
+      let sum = 0;
+      for (let i = 0; i < _micData.length; i++) {
+        const v = (_micData[i] - 128) / 128;
+        sum += v * v;
+      }
+      window.micLevel = Math.sqrt(sum / _micData.length);
+    }
+    _micRafId = requestAnimationFrame(tick);
+  };
+  _micRafId = requestAnimationFrame(tick);
+}
+
 async function _requestMicrophonePermissionsCore() {
-  window.micEnabled = true;
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn('⚠️ getUserMedia not available; microphone unavailable.');
+      if (_debugVisible) debugWarn('Microphone unavailable (no getUserMedia)');
+      window.micEnabled = false;
+      return;
+    }
+
+    const ctx = await _resumeAudioContext();
+
+    if (!_micStream) {
+      _micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    }
+
+    if (ctx && !_micAnalyser) {
+      const source = ctx.createMediaStreamSource(_micStream);
+      _micAnalyser = ctx.createAnalyser();
+      _micAnalyser.fftSize = 1024;
+      _micAnalyser.smoothingTimeConstant = 0.8;
+      source.connect(_micAnalyser);
+      _micData = new Uint8Array(_micAnalyser.fftSize);
+      _startMicLevelLoop();
+    }
+
+    window.micEnabled = true;
+    console.log('✅ Microphone level metering active');
+  } catch (error) {
+    console.error('Microphone permission error:', error);
+    if (_debugVisible) {
+      debugError('Microphone permission error:', error);
+    }
+    window.micEnabled = false;
+  }
 }
 
 async function _requestSoundOutputCore() {
-  window.soundEnabled = true;
+  try {
+    await _resumeAudioContext();
+    window.soundEnabled = true;
+    console.log('✅ Sound output enabled (audio context resumed)');
+  } catch (error) {
+    console.error('Sound output error:', error);
+    if (_debugVisible) {
+      debugError('Sound output error:', error);
+    }
+    window.soundEnabled = true; // no permission needed; enable anyway
+  }
 }
 
 async function _requestSpeechPermissionCore() {
-  window.speechEnabled = true;
+  // Unlock the audio context for the Web Speech API WITHOUT creating a mic
+  // analyser (that would conflict with SpeechRecognition on some browsers).
+  try {
+    await _resumeAudioContext();
+    window.speechEnabled = true;
+    console.log('✅ Speech recognition audio unlocked');
+  } catch (error) {
+    console.error('Speech permission error:', error);
+    if (_debugVisible) {
+      debugError('Speech permission error:', error);
+    }
+    window.speechEnabled = true;
+  }
 }
 
+// PhoneCamera engine + camera permission core land in the next commit.
 async function _requestCameraPermissionCore() {
   window.cameraEnabled = true;
 }
@@ -3473,6 +3599,11 @@ window.bleConnect = bleConnect;
 window.bleDisconnect = bleDisconnect;
 window.bleRead = bleRead;
 window.bleWrite = bleWrite;
+
+// Audio (mic metering + audio-context unlock)
+window.getAudioContext = getAudioContext;
+window.getMicLevel = getMicLevel;
+window.getMicStream = getMicStream;
 
 // Motion data + thresholds
 window.setMoveThreshold = setMoveThreshold;
