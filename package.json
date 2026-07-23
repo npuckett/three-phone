@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "npx terser src/three-phone.js --compress --mangle --output dist/three-phone.min.js && cp src/three-phone.js dist/three-phone.js",
-    "test": "echo \"(contract tests are added in later commits)\" && exit 0",
+    "test": "node test-smoke.js",
     "prepublishOnly": "npm run build",
     "prepare": "npm run build",
     "postversion": "git push && git push --tags",
