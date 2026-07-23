@@ -1415,9 +1415,38 @@ async function _requestSpeechPermissionCore() {
   }
 }
 
-// PhoneCamera engine + camera permission core land in the next commit.
 async function _requestCameraPermissionCore() {
-  window.cameraEnabled = true;
+  // Initialize any PhoneCamera instances created before the gesture. Deferring
+  // init until here fixes the iOS bug where a camera started before permission
+  // came up rotated.
+  try {
+    let cameraStarted = false;
+    if (Array.isArray(window._phoneCameras)) {
+      for (const cam of window._phoneCameras) {
+        if (!cam) continue;
+        if (!cam._ready && !cam._video) {
+          await cam._initializeCamera();
+        }
+        if (cam._ready || cam._video) cameraStarted = true;
+      }
+    }
+    window.cameraEnabled = cameraStarted;
+    if (!cameraStarted) {
+      console.warn('three-phone: No PhoneCamera found. Create one with createPhoneCamera() before enabling camera permissions.');
+      return false;
+    }
+    if (typeof userCameraReady === 'function') {
+      try { userCameraReady(); } catch (e) { console.error('userCameraReady callback error:', e); }
+    }
+    return true;
+  } catch (error) {
+    console.error('Camera permission error:', error);
+    if (_debugVisible) {
+      debugError('Camera permission error:', error);
+    }
+    window.cameraEnabled = false;
+    return false;
+  }
 }
 
 // =========================================
@@ -3452,12 +3481,347 @@ function _updateDebugDisplay() {
 }
 
 // =========================================
-// PHONE CAMERA (implemented in a later build commit)
+// PHONE CAMERA - native getUserMedia + three.js VideoTexture
+// Same public shape as p5-phone's PhoneCamera, minus p5 internals. Coordinate
+// mapping (mapPoint/mapKeypoint/mapBox) matches p5-phone so ml5 code ports over;
+// getTexture()/createBackgroundMesh() replace p5's image() override for three.js.
 // =========================================
 
+class PhoneCamera {
+  constructor(active = 'user', mirror = true, mode = 'fitHeight') {
+    this._active = active;
+    this._mirror = mirror;
+    this._mode = mode;
+    this._fixedWidth = 640;
+    this._fixedHeight = 480;
+    this._video = null;   // native HTMLVideoElement
+    this._stream = null;
+    this._ready = false;
+    this._onReadyCallback = null;
+    this._texture = null;
+    this._bgMesh = null;
+    this._bgWidth = 0;
+    this._bgHeight = 0;
+
+    if (!window._phoneCameras) window._phoneCameras = [];
+    window._phoneCameras.push(this);
+    // Not initialized until an enableCamera* gesture (iOS rotation-bug fix).
+  }
+
+  // --- read-only ---
+  get ready() { return this._ready; }
+  get video() { return this._video; }
+  get videoElement() { return this._video; } // native element (ml5-friendly)
+  get width() { return this._ready ? this.getDimensions().width : 0; }
+  get height() { return this._ready ? this.getDimensions().height : 0; }
+
+  // --- read-write ---
+  get active() { return this._active; }
+  set active(value) {
+    if (value !== 'user' && value !== 'environment') {
+      debugError('PhoneCamera: active must be "user" or "environment"');
+      return;
+    }
+    if (this._active !== value) {
+      this._active = value;
+      if (this._ready || this._video) this._switchCamera();
+    }
+  }
+  get mirror() { return this._mirror; }
+  set mirror(value) { this._mirror = !!value; }
+  get mode() { return this._mode; }
+  set mode(value) {
+    const valid = ['fitWidth', 'fitHeight', 'cover', 'contain', 'fixed'];
+    if (!valid.includes(value)) {
+      debugError('PhoneCamera: mode must be one of: ' + valid.join(', '));
+      return;
+    }
+    this._mode = value;
+  }
+  get fixedWidth() { return this._fixedWidth; }
+  set fixedWidth(value) { this._fixedWidth = Math.max(1, value); }
+  get fixedHeight() { return this._fixedHeight; }
+  set fixedHeight(value) { this._fixedHeight = Math.max(1, value); }
+
+  onReady(callback) {
+    this._onReadyCallback = callback;
+    if (this._ready && this._video && this._video.readyState >= 2) {
+      callback();
+      this._onReadyCallback = null;
+    }
+  }
+
+  // --- internal ---
+  async _initializeCamera() {
+    if (this._ready || this._video) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      debugError('PhoneCamera: getUserMedia is not available in this browser.');
+      return;
+    }
+    try {
+      this._stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: this._active },
+        audio: false
+      });
+      const v = document.createElement('video');
+      v.setAttribute('playsinline', '');
+      v.playsInline = true;
+      v.muted = true;
+      v.autoplay = true;
+      v.srcObject = this._stream;
+      // Keep it in the DOM (some browsers pause detached video) but invisible.
+      v.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(v);
+      this._video = v;
+      try { await v.play(); } catch (e) { /* will play on loadeddata */ }
+
+      const markReady = () => {
+        this._ready = true;
+        if (this._onReadyCallback) {
+          const cb = this._onReadyCallback;
+          this._onReadyCallback = null;
+          cb();
+        }
+      };
+      if (v.readyState >= 2) markReady();
+      else v.addEventListener('loadeddata', markReady, { once: true });
+      console.log('✅ PhoneCamera ready');
+    } catch (err) {
+      debugError('PhoneCamera init failed: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  async _switchCamera() {
+    if (this._stream) this._stream.getTracks().forEach(t => t.stop());
+    if (this._video && this._video.parentNode) this._video.parentNode.removeChild(this._video);
+    if (this._texture && this._texture.dispose) this._texture.dispose();
+    this._video = null;
+    this._stream = null;
+    this._texture = null;
+    this._ready = false;
+    await this._initializeCamera();
+    if (this._bgMesh) {
+      this._bgMesh.material.map = this.getTexture();
+      this._bgMesh.material.needsUpdate = true;
+    }
+    console.log('✅ PhoneCamera switched to ' + this._active + ' camera');
+  }
+
+  _canvasSize() {
+    const c = _findThreeCanvas();
+    const w = c ? (c.clientWidth || c.width) : window.innerWidth;
+    const h = c ? (c.clientHeight || c.height) : window.innerHeight;
+    return { w, h };
+  }
+
+  remove() {
+    if (this._stream) this._stream.getTracks().forEach(t => t.stop());
+    if (this._video && this._video.parentNode) this._video.parentNode.removeChild(this._video);
+    if (this._texture && this._texture.dispose) this._texture.dispose();
+    this._video = null;
+    this._stream = null;
+    this._texture = null;
+    this._ready = false;
+    if (window._phoneCameras && Array.isArray(window._phoneCameras)) {
+      const idx = window._phoneCameras.indexOf(this);
+      if (idx !== -1) window._phoneCameras.splice(idx, 1);
+    }
+  }
+
+  /**
+   * Dimensions of the video as drawn on the canvas for the current mode.
+   * Returns { x, y, width, height, scaleX, scaleY } in canvas (CSS) pixels.
+   */
+  getDimensions() {
+    if (!this._ready || !this._video) {
+      return { x: 0, y: 0, width: 0, height: 0, scaleX: 1, scaleY: 1 };
+    }
+    const videoWidth = this._video.videoWidth;
+    const videoHeight = this._video.videoHeight;
+    if (!videoWidth || !videoHeight) {
+      return { x: 0, y: 0, width: 0, height: 0, scaleX: 1, scaleY: 1 };
+    }
+
+    const size = this._canvasSize();
+    const canvasWidth = size.w;
+    const canvasHeight = size.h;
+    let drawWidth, drawHeight, drawX, drawY;
+
+    if (this._mode === 'fixed') {
+      drawWidth = this._fixedWidth;
+      drawHeight = this._fixedHeight;
+      drawX = (canvasWidth - drawWidth) / 2;
+      drawY = (canvasHeight - drawHeight) / 2;
+    } else if (this._mode === 'fitWidth') {
+      drawWidth = canvasWidth;
+      drawHeight = (videoHeight / videoWidth) * drawWidth;
+      drawX = 0;
+      drawY = (canvasHeight - drawHeight) / 2;
+    } else if (this._mode === 'fitHeight') {
+      drawHeight = canvasHeight;
+      drawWidth = (videoWidth / videoHeight) * drawHeight;
+      drawX = (canvasWidth - drawWidth) / 2;
+      drawY = 0;
+    } else if (this._mode === 'cover') {
+      const scale = Math.max(canvasWidth / videoWidth, canvasHeight / videoHeight);
+      drawWidth = videoWidth * scale;
+      drawHeight = videoHeight * scale;
+      drawX = (canvasWidth - drawWidth) / 2;
+      drawY = (canvasHeight - drawHeight) / 2;
+    } else { // contain
+      const scale = Math.min(canvasWidth / videoWidth, canvasHeight / videoHeight);
+      drawWidth = videoWidth * scale;
+      drawHeight = videoHeight * scale;
+      drawX = (canvasWidth - drawWidth) / 2;
+      drawY = (canvasHeight - drawHeight) / 2;
+    }
+
+    return {
+      x: drawX,
+      y: drawY,
+      width: drawWidth,
+      height: drawHeight,
+      scaleX: drawWidth / videoWidth,
+      scaleY: drawHeight / videoHeight
+    };
+  }
+
+  /** Map a video-space point to canvas coordinates (mirror-aware). */
+  mapPoint(x, y) {
+    const dims = this.getDimensions();
+    let scaledX = x * dims.scaleX;
+    const scaledY = y * dims.scaleY;
+    if (this._mirror) scaledX = dims.width - scaledX;
+    return { x: scaledX + dims.x, y: scaledY + dims.y };
+  }
+
+  mapKeypoint(keypoint) {
+    if (!keypoint || typeof keypoint.x === 'undefined' || typeof keypoint.y === 'undefined') {
+      debugWarn('PhoneCamera.mapKeypoint: invalid keypoint');
+      return keypoint;
+    }
+    const mapped = this.mapPoint(keypoint.x, keypoint.y);
+    return { ...keypoint, x: mapped.x, y: mapped.y };
+  }
+
+  mapKeypoints(keypoints) {
+    if (!Array.isArray(keypoints)) {
+      debugWarn('PhoneCamera.mapKeypoints: expected array');
+      return keypoints;
+    }
+    return keypoints.map(kp => this.mapKeypoint(kp));
+  }
+
+  mapBox(box) {
+    if (!box) {
+      debugWarn('PhoneCamera.mapBox: invalid box');
+      return box;
+    }
+    const boxX = typeof box.x !== 'undefined' ? box.x : box.xMin;
+    const boxY = typeof box.y !== 'undefined' ? box.y : box.yMin;
+    const boxWidth = typeof box.width !== 'undefined' ? box.width : box.xMax - box.xMin;
+    const boxHeight = typeof box.height !== 'undefined' ? box.height : box.yMax - box.yMin;
+    const nx = Number(boxX), ny = Number(boxY), nw = Number(boxWidth), nh = Number(boxHeight);
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nw) || !Number.isFinite(nh)) {
+      debugWarn('PhoneCamera.mapBox: invalid box');
+      return box;
+    }
+    const topLeft = this.mapPoint(nx, ny);
+    const bottomRight = this.mapPoint(nx + nw, ny + nh);
+    const mappedX = Math.min(topLeft.x, bottomRight.x);
+    const mappedY = Math.min(topLeft.y, bottomRight.y);
+    const mappedWidth = Math.abs(bottomRight.x - topLeft.x);
+    const mappedHeight = Math.abs(bottomRight.y - topLeft.y);
+    return {
+      ...box,
+      x: mappedX, y: mappedY, width: mappedWidth, height: mappedHeight,
+      xMin: mappedX, yMin: mappedY, xMax: mappedX + mappedWidth, yMax: mappedY + mappedHeight
+    };
+  }
+
+  mapBoxes(boxes) {
+    if (!Array.isArray(boxes)) {
+      debugWarn('PhoneCamera.mapBoxes: expected array');
+      return boxes;
+    }
+    return boxes.map(box => this.mapBox(box));
+  }
+
+  // --- three.js integration ---
+
+  /** Lazily create (and return) a THREE.VideoTexture for the camera feed. */
+  getTexture() {
+    if (!window.THREE || !window.THREE.VideoTexture) {
+      debugError('PhoneCamera.getTexture() needs three.js — load THREE first.');
+      return null;
+    }
+    if (!this._texture && this._video) {
+      this._texture = new window.THREE.VideoTexture(this._video);
+      if ('SRGBColorSpace' in window.THREE) this._texture.colorSpace = window.THREE.SRGBColorSpace;
+    }
+    return this._texture;
+  }
+
+  /**
+   * Build a screen-filling background mesh (a plane with the camera VideoTexture)
+   * for an orthographic overlay whose coordinate space is top-left origin,
+   * 0..width by 0..height — the setup the ml5 examples use. Honors mode/mirror.
+   * @param {number} [width] - defaults to the current canvas width
+   * @param {number} [height] - defaults to the current canvas height
+   * @returns {THREE.Mesh|null}
+   */
+  createBackgroundMesh(width, height) {
+    if (!window.THREE || !window.THREE.PlaneGeometry) {
+      debugError('PhoneCamera.createBackgroundMesh() needs three.js — load THREE first.');
+      return null;
+    }
+    const size = this._canvasSize();
+    const W = width || size.w;
+    const H = height || size.h;
+    const tex = this.getTexture();
+    const geo = new window.THREE.PlaneGeometry(W, H);
+    const mat = new window.THREE.MeshBasicMaterial({ map: tex, depthTest: false, depthWrite: false });
+    const mesh = new window.THREE.Mesh(geo, mat);
+    mesh.position.set(W / 2, H / 2, -10);
+    mesh.renderOrder = -1;
+    this._bgMesh = mesh;
+    this._bgWidth = W;
+    this._bgHeight = H;
+    this.updateBackground();
+    return mesh;
+  }
+
+  /** Re-fit the background texture (cover) to the canvas + video aspect. Call on resize. */
+  updateBackground() {
+    if (!this._bgMesh || !this._video || !window.THREE) return;
+    const tex = this._bgMesh.material.map;
+    if (!tex || !tex.repeat) return;
+    const vw = this._video.videoWidth, vh = this._video.videoHeight;
+    if (!vw || !vh) return;
+    const Ac = this._bgWidth / this._bgHeight;
+    const Av = vw / vh;
+    let rx = 1, ry = 1, ox = 0, oy = 0;
+    if (Av > Ac) { rx = Ac / Av; ox = (1 - rx) / 2; }
+    else { ry = Av / Ac; oy = (1 - ry) / 2; }
+    if (this._mirror) { rx = -Math.abs(rx); ox = 1 - ox; }
+    tex.wrapS = window.THREE.ClampToEdgeWrapping;
+    tex.wrapT = window.THREE.ClampToEdgeWrapping;
+    tex.center.set(0.5, 0.5);
+    tex.repeat.set(rx, ry);
+    tex.offset.set(ox, oy);
+    tex.needsUpdate = true;
+  }
+}
+
+/**
+ * Create a new PhoneCamera.
+ * @param {string} active - 'user' (front) or 'environment' (back)
+ * @param {boolean} mirror - mirror the video horizontally (default true)
+ * @param {string} mode - 'fitWidth'|'fitHeight'|'cover'|'contain'|'fixed'
+ * @returns {PhoneCamera}
+ */
 function createPhoneCamera(active = 'user', mirror = true, mode = 'fitHeight') {
-  debugWarn('createPhoneCamera() lands in a later three-phone build.');
-  return null;
+  return new PhoneCamera(active, mirror, mode);
 }
 
 // =========================================
