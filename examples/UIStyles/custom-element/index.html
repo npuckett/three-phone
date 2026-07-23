@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>three-phone · UI Style: Custom Element</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0e0b16; font-family: -apple-system, system-ui, sans-serif; }
+    /* Your own button — three-phone just binds the permission request to it via enableGyroOn('#start'). */
+    #start {
+      position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%);
+      padding: 16px 30px; font-size: 17px; font-weight: 700; letter-spacing: 0.5px;
+      color: #fff; background: linear-gradient(135deg, #7c4dff, #6a1b9a);
+      border: 2px solid #b98bff; border-radius: 40px; cursor: pointer; z-index: 10;
+      box-shadow: 0 8px 24px rgba(124,77,255,0.4);
+    }
+    #start:active { transform: translateX(-50%) scale(0.96); }
+  </style>
+  <script src="../../../dist/three-phone.js"></script>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <button id="start">✦ Start motion</button>
+  <script type="module">
+    import * as THREE from 'three';
+    window.THREE = THREE;
+    const s = document.createElement('script'); s.src = 'sketch.js'; document.body.appendChild(s);
+  </script>
+</body>
+</html>
