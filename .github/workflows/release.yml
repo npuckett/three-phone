@@ -36,6 +36,10 @@ jobs:
   create-release:
     needs: test
     runs-on: ubuntu-latest
+    # Creating a GitHub Release requires write access to repo contents; the
+    # default GITHUB_TOKEN is read-only, which 403s.
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v4
 
