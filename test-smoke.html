@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>three-phone smoke test</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #14121c; color: #eee; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
+    #log { position: fixed; left: 10px; bottom: 10px; font: 12px/1.5 monospace; white-space: pre; z-index: 5; }
+  </style>
+
+  <!-- three-phone (classic script, window globals) -->
+  <script src="./dist/three-phone.js"></script>
+
+  <!-- three.js via import map -->
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <div id="log">booting…</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    window.THREE = THREE;
+
+    // Verify the public API surface exists.
+    const required = ['enableGyroTap', 'lockGestures', 'rotationX', 'applyDeviceRotation',
+      'getRotationQuaternion', 'getTouchRaycaster', 'screenToWorld', 'vibrate',
+      'bleSetup', 'geoDistance', 'createPhoneCamera', 'setPhoneCanvas'];
+    const missing = required.filter((n) => typeof window[n] === 'undefined');
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
+    camera.position.z = 4;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+    setPhoneCanvas(renderer);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.2));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.5); dir.position.set(2, 3, 2); scene.add(dir);
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 2.4, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x8b5cf6, roughness: 0.4, metalness: 0.1 })
+    );
+    scene.add(cube);
+
+    const log = document.getElementById('log');
+    let frames = 0;
+    function animate() {
+      requestAnimationFrame(animate);
+      if (window.sensorsEnabled) {
+        applyDeviceRotation(cube, { smooth: 0.85 });
+      } else {
+        cube.rotation.y += 0.01;
+      }
+      renderer.render(scene, camera);
+      frames++;
+      if (frames % 15 === 0) {
+        log.textContent =
+          (missing.length ? 'MISSING: ' + missing.join(', ') : 'API OK (' + required.length + ' globals)') +
+          `\nsensorsEnabled=${window.sensorsEnabled}` +
+          `\nrotationX=${window.rotationX.toFixed(1)} rotationY=${window.rotationY.toFixed(1)} rotationZ=${window.rotationZ.toFixed(1)}` +
+          `\ntouches=${window.touches.length} mouse=${window.mouseX},${window.mouseY}` +
+          `\nframes=${frames} THREE r${THREE.REVISION}`;
+      }
+    }
+    animate();
+
+    console.log(missing.length ? ('SMOKE_HTML_FAIL missing ' + missing.join(',')) : 'SMOKE_HTML_PASS');
+    enableGyroTap('Tap to enable motion sensors');
+    lockGestures();
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>

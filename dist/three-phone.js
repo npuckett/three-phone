@@ -118,6 +118,33 @@ window.geoError = '';
 window.lastGeoPosition = null;
 window.micLevel = 0;
 
+// Motion data (p5-compatible names, always in DEGREES).
+// p5 varies these by angleMode(); three-phone has no angleMode, so rotation
+// values are always degrees — the most intuitive default for three.js.
+window.rotationX = 0;          // device beta  (front/back tilt, -180..180)
+window.rotationY = 0;          // device gamma (left/right tilt, -90..90)
+window.rotationZ = 0;          // device alpha (compass heading, 0..360)
+window.pRotationX = 0;
+window.pRotationY = 0;
+window.pRotationZ = 0;
+window.accelerationX = 0;      // m/s^2 (matches p5: acceleration * 2)
+window.accelerationY = 0;
+window.accelerationZ = 0;
+window.pAccelerationX = null;  // null until the first devicemotion event
+window.pAccelerationY = null;
+window.pAccelerationZ = null;
+window.rotationRateAlpha = 0;  // deg/s (three-phone extra; p5 has no rotationRate)
+window.rotationRateBeta = 0;
+window.rotationRateGamma = 0;
+window.deviceOrientation = 'portrait';
+
+// Touch data (p5-compatible names). Populated by the touch subsystem at load.
+window.touches = [];
+window.mouseX = 0;
+window.mouseY = 0;
+window.pmouseX = 0;
+window.pmouseY = 0;
+
 // three-phone version, for feature detection from sketches
 window.THREE_PHONE_VERSION = '0.1.0';
 
@@ -1267,9 +1294,348 @@ async function _requestCameraPermissionCore() {
   window.cameraEnabled = true;
 }
 
-// Motion data listeners are installed by the motion engine (later commit).
-// Stubbed here so the motion permission core can call it unconditionally.
-function _installMotionListeners() { /* replaced by the motion engine commit */ }
+// =========================================
+// MOTION DATA ENGINE
+// p5-phone delegates motion data to p5's built-in globals. three.js has none,
+// so three-phone owns the DeviceOrientation/DeviceMotion listeners and exposes
+// the same window globals p5 does (rotationX/Y/Z, accelerationX/Y/Z, ...),
+// plus three.js-native helpers below.
+// =========================================
+
+let _moveThreshold = 0.5;   // p5 default
+let _shakeThreshold = 30;   // p5 default
+
+/**
+ * Set the movement threshold for deviceMoved(). Default 0.5.
+ */
+function setMoveThreshold(value) {
+  if (typeof value === 'number') _moveThreshold = value;
+}
+
+/**
+ * Set the shake threshold for deviceShaken(). Default 30.
+ */
+function setShakeThreshold(value) {
+  if (typeof value === 'number') _shakeThreshold = value;
+}
+
+// --- Pure, testable motion math (see test-motion-contract.js) ---
+
+// Map a DeviceOrientationEvent's (alpha, beta, gamma) to p5's rotation globals.
+function _computeOrientationGlobals(alpha, beta, gamma) {
+  return {
+    rotationX: (beta == null ? 0 : beta),   // p5 rotationX = beta
+    rotationY: (gamma == null ? 0 : gamma),  // p5 rotationY = gamma
+    rotationZ: (alpha == null ? 0 : alpha)   // p5 rotationZ = alpha
+  };
+}
+
+// Shake metric (matches p5): |ΔaccelX| + |ΔaccelY|.
+function _shakeDelta(accX, accY, pAccX, pAccY) {
+  return Math.abs(accX - pAccX) + Math.abs(accY - pAccY);
+}
+
+// Move test (matches p5): any per-axis acceleration delta exceeds the threshold.
+function _moveExceeded(accX, accY, accZ, pAccX, pAccY, pAccZ, threshold) {
+  return Math.abs(accX - pAccX) > threshold ||
+         Math.abs(accY - pAccY) > threshold ||
+         Math.abs(accZ - pAccZ) > threshold;
+}
+
+// Device orientation (alpha,beta,gamma in DEGREES) + screen angle (DEGREES) to a
+// world quaternion for driving an Object3D. Standard three.js
+// DeviceOrientationControls math, implemented without a THREE dependency so it
+// can be unit-tested and used before THREE loads. Returns {x,y,z,w} (normalized).
+function _orientationToQuaternion(alpha, beta, gamma, screenAngleDeg) {
+  const deg2rad = Math.PI / 180;
+  const x = (beta || 0) * deg2rad;   // Euler X = beta
+  const y = (alpha || 0) * deg2rad;  // Euler Y = alpha
+  const z = -(gamma || 0) * deg2rad; // Euler Z = -gamma
+  const orient = (screenAngleDeg || 0) * deg2rad;
+
+  // Quaternion from Euler, order 'YXZ'
+  const c1 = Math.cos(x / 2), s1 = Math.sin(x / 2);
+  const c2 = Math.cos(y / 2), s2 = Math.sin(y / 2);
+  const c3 = Math.cos(z / 2), s3 = Math.sin(z / 2);
+  let qx = s1 * c2 * c3 + c1 * s2 * s3;
+  let qy = c1 * s2 * c3 - s1 * c2 * s3;
+  let qz = c1 * c2 * s3 - s1 * s2 * c3;
+  let qw = c1 * c2 * c3 + s1 * s2 * s3;
+
+  // Multiply by q1 = quaternion(-sqrt(0.5), 0, 0, sqrt(0.5)) — camera/object
+  // looks out the back of the device rather than the top.
+  const h = Math.sqrt(0.5);
+  const b1x = -h, b1y = 0, b1z = 0, b1w = h;
+  let rx = qw * b1x + qx * b1w + qy * b1z - qz * b1y;
+  let ry = qw * b1y - qx * b1z + qy * b1w + qz * b1x;
+  let rz = qw * b1z + qx * b1y - qy * b1x + qz * b1w;
+  let rw = qw * b1w - qx * b1x - qy * b1y - qz * b1z;
+
+  // Multiply by q0 = axis-angle about world Z by -orient (screen rotation).
+  const s = Math.sin(-orient / 2), cw = Math.cos(-orient / 2);
+  const b0x = 0, b0y = 0, b0z = s, b0w = cw;
+  const ox = rw * b0x + rx * b0w + ry * b0z - rz * b0y;
+  const oy = rw * b0y - rx * b0z + ry * b0w + rz * b0x;
+  const oz = rw * b0z + rx * b0y - ry * b0x + rz * b0w;
+  const ow = rw * b0w - rx * b0x - ry * b0y - rz * b0z;
+
+  const len = Math.sqrt(ox * ox + oy * oy + oz * oz + ow * ow) || 1;
+  return { x: ox / len, y: oy / len, z: oz / len, w: ow / len };
+}
+
+// --- Listeners + dispatch ---
+
+function _currentScreenAngle() {
+  if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
+    return screen.orientation.angle;
+  }
+  if (typeof window.orientation === 'number') return window.orientation;
+  return 0;
+}
+
+function _updateDeviceOrientationLabel() {
+  const angle = _currentScreenAngle();
+  window.deviceOrientation = (angle === 90 || angle === -90 || angle === 270)
+    ? 'landscape' : 'portrait';
+}
+
+function _onDeviceOrientation(e) {
+  window.pRotationX = window.rotationX;
+  window.pRotationY = window.rotationY;
+  window.pRotationZ = window.rotationZ;
+  const g = _computeOrientationGlobals(e.alpha, e.beta, e.gamma);
+  window.rotationX = g.rotationX;
+  window.rotationY = g.rotationY;
+  window.rotationZ = g.rotationZ;
+}
+
+function _onDeviceMotion(e) {
+  window.pAccelerationX = window.accelerationX;
+  window.pAccelerationY = window.accelerationY;
+  window.pAccelerationZ = window.accelerationZ;
+
+  const acc = e.acceleration || { x: 0, y: 0, z: 0 };
+  window.accelerationX = (acc.x || 0) * 2;
+  window.accelerationY = (acc.y || 0) * 2;
+  window.accelerationZ = (acc.z || 0) * 2;
+
+  const rr = e.rotationRate || {};
+  window.rotationRateAlpha = rr.alpha || 0;
+  window.rotationRateBeta = rr.beta || 0;
+  window.rotationRateGamma = rr.gamma || 0;
+
+  _handleMotionCallbacks();
+}
+
+function _handleMotionCallbacks() {
+  if (typeof deviceMoved === 'function') {
+    if (_moveExceeded(window.accelerationX, window.accelerationY, window.accelerationZ,
+        window.pAccelerationX || 0, window.pAccelerationY || 0, window.pAccelerationZ || 0,
+        _moveThreshold)) {
+      try { deviceMoved(); } catch (err) { console.error('deviceMoved callback error:', err); }
+    }
+  }
+  if (typeof deviceShaken === 'function') {
+    if (window.pAccelerationX !== null &&
+        _shakeDelta(window.accelerationX, window.accelerationY,
+          window.pAccelerationX, window.pAccelerationY) > _shakeThreshold) {
+      try { deviceShaken(); } catch (err) { console.error('deviceShaken callback error:', err); }
+    }
+  }
+}
+
+function _installMotionListeners() {
+  if (window._threePhoneMotionInstalled) return;
+  window._threePhoneMotionInstalled = true;
+  window.addEventListener('deviceorientation', _onDeviceOrientation, false);
+  window.addEventListener('devicemotion', _onDeviceMotion, false);
+  _updateDeviceOrientationLabel();
+  window.addEventListener('orientationchange', _updateDeviceOrientationLabel, false);
+  if (typeof screen !== 'undefined' && screen.orientation && screen.orientation.addEventListener) {
+    screen.orientation.addEventListener('change', _updateDeviceOrientationLabel);
+  }
+}
+
+// =========================================
+// THREE.JS-NATIVE MOTION HELPERS
+// These touch window.THREE lazily; they warn (once) if three.js is absent.
+// =========================================
+
+let _tmpDeviceQuat = null;
+
+function _deviceQuaternionRaw() {
+  // DeviceOrientationControls mapping: alpha=rotationZ, beta=rotationX, gamma=rotationY
+  return _orientationToQuaternion(window.rotationZ, window.rotationX, window.rotationY, _currentScreenAngle());
+}
+
+/**
+ * Get the device's world rotation as a quaternion.
+ * @param {THREE.Quaternion} [target] - optional quaternion to fill
+ * @returns {THREE.Quaternion|{x,y,z,w}}
+ */
+function getRotationQuaternion(target) {
+  const q = _deviceQuaternionRaw();
+  if (target && typeof target.set === 'function') {
+    target.set(q.x, q.y, q.z, q.w);
+    return target;
+  }
+  if (window.THREE && window.THREE.Quaternion) {
+    return new window.THREE.Quaternion(q.x, q.y, q.z, q.w);
+  }
+  return q;
+}
+
+/**
+ * Get the device's world rotation as a THREE.Euler.
+ * @param {THREE.Euler} [target] - optional euler to fill
+ */
+function getRotationEuler(target) {
+  if (!window.THREE || !window.THREE.Euler) {
+    debugError('getRotationEuler() needs three.js — load THREE before calling it.');
+    return { x: window.rotationX, y: window.rotationY, z: window.rotationZ };
+  }
+  const q = getRotationQuaternion();
+  const e = target || new window.THREE.Euler();
+  e.setFromQuaternion(q);
+  return e;
+}
+
+/**
+ * Rotate an Object3D to match the device's current attitude. Call every frame.
+ * @param {THREE.Object3D} object3D
+ * @param {Object} [opts]
+ * @param {number} [opts.smooth=0] - 0 = snap; higher (up to ~0.9) = smoother slerp
+ */
+function applyDeviceRotation(object3D, opts = {}) {
+  if (!object3D || !object3D.quaternion) {
+    debugError('applyDeviceRotation() needs a THREE.Object3D.');
+    return;
+  }
+  const smooth = Math.max(0, Math.min(0.99, opts.smooth || 0));
+  const q = _deviceQuaternionRaw();
+  if (window.THREE && smooth > 0 && typeof object3D.quaternion.slerp === 'function') {
+    if (!_tmpDeviceQuat) _tmpDeviceQuat = new window.THREE.Quaternion();
+    _tmpDeviceQuat.set(q.x, q.y, q.z, q.w);
+    object3D.quaternion.slerp(_tmpDeviceQuat, 1 - smooth);
+  } else {
+    object3D.quaternion.set(q.x, q.y, q.z, q.w);
+  }
+}
+
+// =========================================
+// TOUCH SUBSYSTEM
+// p5 gives sketches touches[]/mouseX/touchStarted() for free. three-phone
+// installs pointer listeners at load and exposes the same globals + callbacks.
+// =========================================
+
+const _activePointers = new Map();
+
+function _rebuildTouches() {
+  window.touches = Array.from(_activePointers.values()).map(p => ({ x: p.x, y: p.y, id: p.id }));
+}
+
+function _updateMouse(e) {
+  window.pmouseX = window.mouseX;
+  window.pmouseY = window.mouseY;
+  window.mouseX = e.clientX;
+  window.mouseY = e.clientY;
+}
+
+function _installTouchListeners() {
+  if (window._threePhoneTouchInstalled) return;
+  window._threePhoneTouchInstalled = true;
+
+  const onDown = (e) => {
+    _activePointers.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    _rebuildTouches();
+    _updateMouse(e);
+    if (typeof touchStarted === 'function') {
+      try { touchStarted(e); } catch (err) { console.error('touchStarted callback error:', err); }
+    }
+  };
+  const onMove = (e) => {
+    _updateMouse(e);
+    if (_activePointers.has(e.pointerId)) {
+      const p = _activePointers.get(e.pointerId);
+      p.x = e.clientX;
+      p.y = e.clientY;
+      _rebuildTouches();
+      if (typeof touchMoved === 'function') {
+        try { touchMoved(e); } catch (err) { console.error('touchMoved callback error:', err); }
+      }
+    }
+  };
+  const onUp = (e) => {
+    _activePointers.delete(e.pointerId);
+    _rebuildTouches();
+    _updateMouse(e);
+    if (typeof touchEnded === 'function') {
+      try { touchEnded(e); } catch (err) { console.error('touchEnded callback error:', err); }
+    }
+  };
+
+  window.addEventListener('pointerdown', onDown, { passive: true });
+  window.addEventListener('pointermove', onMove, { passive: true });
+  window.addEventListener('pointerup', onUp, { passive: true });
+  window.addEventListener('pointercancel', onUp, { passive: true });
+}
+
+/**
+ * Convert screen (client) coordinates to normalized device coordinates using
+ * the three.js canvas rect.
+ */
+function _screenToNDC(x, y) {
+  const canvas = _findThreeCanvas();
+  const rect = canvas && canvas.getBoundingClientRect
+    ? canvas.getBoundingClientRect()
+    : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  const nx = ((x - rect.left) / rect.width) * 2 - 1;
+  const ny = -(((y - rect.top) / rect.height) * 2 - 1);
+  return { x: nx, y: ny };
+}
+
+/**
+ * Build (or reuse) a THREE.Raycaster aimed from the camera through a screen point.
+ * @param {number} x - client X (e.g. touches[0].x or mouseX)
+ * @param {number} y - client Y
+ * @param {THREE.Camera} camera
+ * @param {THREE.Raycaster} [raycaster] - optional raycaster to reuse
+ */
+function getTouchRaycaster(x, y, camera, raycaster) {
+  if (!window.THREE || !window.THREE.Raycaster) {
+    debugError('getTouchRaycaster() needs three.js — load THREE before calling it.');
+    return null;
+  }
+  const rc = raycaster || new window.THREE.Raycaster();
+  const ndc = _screenToNDC(x, y);
+  rc.setFromCamera(new window.THREE.Vector2(ndc.x, ndc.y), camera);
+  return rc;
+}
+
+/**
+ * Project a screen point into the 3D world at depth z (world Z plane).
+ * @param {number} x - client X
+ * @param {number} y - client Y
+ * @param {THREE.Camera} camera
+ * @param {number} [z=0] - target world Z
+ * @returns {THREE.Vector3|null}
+ */
+function screenToWorld(x, y, camera, z = 0) {
+  if (!window.THREE || !window.THREE.Vector3) {
+    debugError('screenToWorld() needs three.js — load THREE before calling it.');
+    return null;
+  }
+  const ndc = _screenToNDC(x, y);
+  const v = new window.THREE.Vector3(ndc.x, ndc.y, 0.5);
+  v.unproject(camera);
+  if (camera.isPerspectiveCamera) {
+    v.sub(camera.position).normalize();
+    const dist = (z - camera.position.z) / v.z;
+    return camera.position.clone().add(v.multiplyScalar(dist));
+  }
+  v.z = z;
+  return v;
+}
 
 async function _requestVibrationPermissionCore() {
   try {
@@ -3108,8 +3474,22 @@ window.bleDisconnect = bleDisconnect;
 window.bleRead = bleRead;
 window.bleWrite = bleWrite;
 
+// Motion data + thresholds
+window.setMoveThreshold = setMoveThreshold;
+window.setShakeThreshold = setShakeThreshold;
+
+// three.js-native motion + input helpers
+window.getRotationQuaternion = getRotationQuaternion;
+window.getRotationEuler = getRotationEuler;
+window.applyDeviceRotation = applyDeviceRotation;
+window.getTouchRaycaster = getTouchRaycaster;
+window.screenToWorld = screenToWorld;
+
 // Camera (the PhoneCamera engine and camera permission core land in a later commit)
 window.createPhoneCamera = createPhoneCamera;
+
+// Install the touch subsystem immediately (no permission needed, like p5).
+_installTouchListeners();
 
 if (typeof console !== 'undefined' && console.log) {
   console.log('three-phone ' + window.THREE_PHONE_VERSION + ' loaded');

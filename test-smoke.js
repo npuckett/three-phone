@@ -73,7 +73,10 @@ const expected = new Set([
   // BLE
   'isBleSupported', 'bleSetup', 'bleConnect', 'bleDisconnect', 'bleRead', 'bleWrite',
   // Camera
-  'createPhoneCamera'
+  'createPhoneCamera',
+  // Motion thresholds + three.js helpers
+  'setMoveThreshold', 'setShakeThreshold', 'getRotationQuaternion',
+  'getRotationEuler', 'applyDeviceRotation', 'getTouchRaycaster', 'screenToWorld'
 ]);
 
 // The full enable matrix (features x styles), minus a few combos that only some
@@ -97,7 +100,12 @@ for (const name of expected) {
 const statusGlobals = ['sensorsEnabled', 'micEnabled', 'soundEnabled', 'gesturesLocked',
   'vibrationEnabled', 'speechEnabled', 'nfcEnabled', 'cameraEnabled', 'torchEnabled',
   'bleSupported', 'bleConnected', 'bleValues', 'geoEnabled', 'lastGeoPosition',
-  'micLevel', 'THREE_PHONE_VERSION'];
+  'micLevel', 'THREE_PHONE_VERSION',
+  // Motion + touch data globals
+  'rotationX', 'rotationY', 'rotationZ', 'pRotationX', 'pRotationY', 'pRotationZ',
+  'accelerationX', 'accelerationY', 'accelerationZ',
+  'rotationRateAlpha', 'rotationRateBeta', 'rotationRateGamma', 'deviceOrientation',
+  'touches', 'mouseX', 'mouseY', 'pmouseX', 'pmouseY'];
 for (const name of statusGlobals) {
   if (!(name in sandbox)) missing.push('(status) ' + name);
 }
