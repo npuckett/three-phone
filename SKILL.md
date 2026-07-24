@@ -1,7 +1,7 @@
 ---
 name: three-phone
 description: Mobile hardware access (motion, touch, mic, camera, NFC, GPS, BLE, vibration, torch) for three.js sketches. Use when a user builds a phone-sensor-driven three.js scene.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # three-phone
@@ -32,7 +32,7 @@ It loads as a **classic `<script>`** and puts everything on `window`.
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>html, body { margin: 0; height: 100%; overflow: hidden; }</style>
-  <script src="https://cdn.jsdelivr.net/npm/three-phone@0.1.0/dist/three-phone.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three-phone@0.2.0/dist/three-phone.min.js"></script>
   <script type="importmap">
   { "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
@@ -63,6 +63,14 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 - Combine: `enablePermissionsTap(['sensors','mic','vibration'], msg)`. Tokens: `sensors, mic,
   sound, speech, vibration, torch, nfc, geo, camera` (plus aliases). BLE takes an options
   object: `enableBleTap({ label, statusText, position })`.
+- **AR (magic window)** → all five styles: `enableARTap/Button/Canvas/Banner/On` — sugar for
+  `enablePermissions<Style>(['camera','sensors'])`. Combo token `'ar'`/`'magicwindow'` also
+  works. Status: `window.arEnabled` (camera **and** sensors granted); `ar` field on the
+  `permissionsReady` detail. **iOS fires two prompts from one tap** (motion, then camera).
+- **WebXR** (immersive-ar) → **Tap/Button/On only**: `enableXRTap(msg?, sessionInit?)`,
+  `enableXRButton(text?, statusText?, sessionInit?)`, `enableXROn(selector, sessionInit?)`.
+  Status: `window.xrActive` (also `xrEnabled`, `xrSupported`). **Android Chrome over HTTPS
+  only**; on unsupported devices the control rewrites to "not supported" and never arms.
 - Optional `userSetupComplete()` runs after any grant; `permissionsReady` event fires on
   `window`.
 
@@ -84,6 +92,19 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 **Camera** → `cam = createPhoneCamera(active, mirror, mode)`, `enableCameraTap()`,
 `cam.onReady(cb)`, `cam.getTexture()`, `cam.createBackgroundMesh()`, `cam.mapKeypoints(kps)`
 (video→canvas coords for ml5), `cam.videoElement` (feed ml5). Init is deferred to the gesture.
+
+**AR (magic window)** (iOS + Android) → `cam = createPhoneCamera('environment', false, 'cover')`,
+`cam.onReady(() => cam.attachBackground(scene))` (camera feed → `scene.background`),
+`enableARTap()`, then per frame `applyDeviceRotation(camera, { smooth })`. Call
+`cam.updateBackground()` on resize. Status `window.arEnabled`. Uses a normal
+`requestAnimationFrame` loop.
+
+**WebXR** (Android Chrome, HTTPS) → `setPhoneCanvas(renderer)` **first**, then
+`enableXRTap(msg?, sessionInit?)`. Loop with **`renderer.setAnimationLoop((time, frame) => …)`**
+(never `requestAnimationFrame`), and **do not set `scene.background`**. Placement:
+`getXRHitPose(frame)` → `{ position, quaternion, matrix } | null` for a reticle. In-session taps
+route to global `touchStarted()`. `isXRSupported()` → `Promise<boolean>`; `endXR()`; flags
+`xrActive`/`xrEnabled`; optional `xrSessionStarted()`/`xrSessionEnded()`.
 
 **NFC** (Android Chrome, HTTPS) → `enableNfcTap()`, `nfcRead(message, serial)`,
 `setNfcTagAlias(serial, name)`, `isNfcTag(name, serial)`.
@@ -113,3 +134,14 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 - Assuming vibration/torch/NFC work on iOS Safari — they don't; degrade gracefully.
 - Reading `getMicLevel()` before `enableMicTap()` has been granted (it stays 0).
 - Forgetting `renderer.render(scene, camera)` in `animate()`.
+- Using `requestAnimationFrame` in a WebXR sketch — it must drive the loop with
+  `renderer.setAnimationLoop((time, frame) => …)` so the XR display supplies frames (and so
+  `frame` is available for `getXRHitPose`).
+- Setting `scene.background` in a WebXR AR scene — passthrough needs it `null`; a background
+  hides the camera feed.
+- Expecting WebXR (`enableXR*`) to work on iOS — it doesn't; iOS Safari has no immersive-ar.
+  Use magic-window AR (`enableAR*`) there instead.
+- Calling `cam.attachBackground(scene)` before `cam.onReady(...)` — the video isn't live yet,
+  so it no-ops. Always call it inside the `onReady` callback.
+- Forgetting `cam.updateBackground()` in the resize handler — the magic-window background stops
+  cover-fitting the canvas.

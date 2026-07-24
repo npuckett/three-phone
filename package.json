@@ -1,6 +1,6 @@
 {
   "name": "three-phone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Simplified mobile hardware access for three.js - handle motion sensors, microphone, touch, camera, and browser gestures with ease. Companion to p5-phone.",
   "main": "src/three-phone.js",
   "files": [
@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "npx terser src/three-phone.js --compress --mangle --output dist/three-phone.min.js && cp src/three-phone.js dist/three-phone.js",
-    "test": "node test-smoke.js && node test-motion-contract.js && node test-ble-contract.js && node test-geo-contract.js",
+    "test": "node test-smoke.js && node test-motion-contract.js && node test-ble-contract.js && node test-geo-contract.js && node test-xr-contract.js",
     "prepublishOnly": "npm run build",
     "prepare": "npm run build",
     "version": "npm run build && git add dist && echo \"Version bumped to $npm_package_version\"",

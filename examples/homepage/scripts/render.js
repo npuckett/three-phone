@@ -53,6 +53,10 @@
     { tags: ['vibration'], group: 'three-phone', label: 'enableVibrationTap() / vibrate()', href: '#api-vibration' },
     { tags: ['torch'], group: 'three-phone', label: 'enableTorchTap() / toggleTorch()', href: '#api-torch' },
     { tags: ['camera'], group: 'three-phone', label: 'createPhoneCamera() / PhoneCamera', href: '#api-camera' },
+    { tags: ['ar'], group: 'three-phone', label: 'enableARTap() / cam.attachBackground()', href: '#api-ar' },
+    { tags: ['xr'], group: 'three-phone', label: 'enableXRTap() / getXRHitPose()', href: '#api-xr' },
+    { tags: ['xr'], group: 'External', label: 'WebXR Device API', href: 'https://developer.mozilla.org/en-US/docs/Web/API/WebXR_Device_API' },
+    { tags: ['hit-test'], group: 'External', label: 'WebXR Hit Test', href: 'https://developer.mozilla.org/en-US/docs/Web/API/XRHitTestResult' },
     { tags: ['ml5'], group: 'External', label: 'ml5.js', href: 'https://docs.ml5js.org/' },
     { tags: ['facemesh'], group: 'External', label: 'ml5.faceMesh()', href: 'https://docs.ml5js.org/#/reference/facemesh' },
     { tags: ['handpose'], group: 'External', label: 'ml5.handPose()', href: 'https://docs.ml5js.org/#/reference/handpose' },
@@ -306,6 +310,7 @@
     const preferredOrder = {
       Start: ['Starter'],
       Input: ['Touch', 'Movement', 'Microphone', 'Speech', 'BLE', 'NFC', 'GPS', 'Camera'],
+      'AR / XR': ['Magic Window', 'WebXR'],
       Output: ['Sound', 'Vibration', 'Torch', 'BLE'],
       Reference: ['UI Styles', 'Phone and GIF', 'UX Compare']
     };
@@ -347,7 +352,7 @@
 
     const filtered = examples.filter(example => exampleMatches(example, filters));
     const grouped = groupExamples(filtered);
-    const categoryOrder = ['Start', 'Input', 'Output', 'Reference'];
+    const categoryOrder = ['Start', 'Input', 'AR / XR', 'Output', 'Reference'];
     const groupsHtml = categoryOrder
       .filter(category => grouped[category])
       .map(category => {

@@ -4,6 +4,29 @@ All notable changes to three-phone are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0]
+
+Augmented-reality release: magic-window AR everywhere, plus WebXR immersive-ar on Android Chrome.
+
+### Added
+- **Magic-window AR helpers** — the `enableARTap/Button/Canvas/Banner/On` family (sugar for
+  `enablePermissions<Style>(['camera', 'sensors'])`), the new `'ar'` / `'magicwindow'` token for
+  `enablePermissions*` combo lists, the `window.arEnabled` flag (camera **and** sensors granted),
+  and an `ar` field on the `permissionsReady` event detail.
+- **`PhoneCamera.attachBackground(scene)`** — sets `scene.background` to the cover-fit camera
+  `VideoTexture` (paired with `updateBackground()` on resize) for the simplest camera-behind-scene
+  setup.
+- **WebXR immersive-ar helpers** — `enableXRTap/Button/On` (Tap/Button/On only) to enter the
+  OS-level AR session on Android Chrome, `isXRSupported()` → `Promise<boolean>`, `getXRHitPose()`
+  for hit-test placement, `endXR()`, the `window.xrSupported/xrEnabled/xrActive` flags, in-session
+  `select` → global `touchStarted()` routing, and optional `xrSessionStarted()`/`xrSessionEnded()`
+  callbacks. Session defaults `requiredFeatures: ['local']`, `optionalFeatures: ['hit-test',
+  'dom-overlay']`; requires `setPhoneCanvas(renderer)`.
+- **Six AR/XR examples** — `examples/AR Examples/magicWindow/` (`01_look_around`, `02_tap_to_place`,
+  `03_panorama`, `04_shake_physics`, iOS + Android) and `examples/AR Examples/webxr/`
+  (`01_enter_ar`, `02_hit_test_place`, Android Chrome).
+- **AR / XR** catalog category in the docs/example gallery.
+
 ## [0.1.0] - Unreleased
 
 Initial release: a three.js companion to [p5-phone](https://github.com/npuckett/p5-phone)

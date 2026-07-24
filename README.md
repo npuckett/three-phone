@@ -23,6 +23,7 @@ locking, or `DeviceOrientationEvent` quirks.
 - [Touch & picking](#touch--picking)
 - [Microphone, sound & speech](#microphone-sound--speech)
 - [Camera (PhoneCamera)](#camera-phonecamera)
+- [AR / XR](#ar--xr)
 - [NFC](#nfc)
 - [GPS / geolocation](#gps--geolocation)
 - [Bluetooth (BLE)](#bluetooth-ble)
@@ -45,7 +46,7 @@ non-module script.
 
 ```html
 <!-- 1) three-phone: plain script, exposes window globals -->
-<script src="https://cdn.jsdelivr.net/npm/three-phone@0.1.0/dist/three-phone.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three-phone@0.2.0/dist/three-phone.min.js"></script>
 
 <!-- 2) three.js via import map -->
 <script type="importmap">
@@ -251,6 +252,94 @@ enableCameraTap();
 The camera is created but not started until the `enableCamera*` gesture (fixes an iOS
 rotation bug). See the `examples/ml5/*` sketches for BodyPose / FaceMesh / HandPose.
 
+## AR / XR
+
+Two paths to augmented reality, for two different capabilities. **Magic-window AR** fuses the
+camera feed with motion sensors and runs everywhere; **WebXR immersive-ar** enters the OS-level
+AR session and only exists on Android Chrome.
+
+### Magic-window AR (iOS + Android)
+
+The camera feed becomes the scene background and `applyDeviceRotation` steers the 3D camera by
+the phone's orientation — no OS-level AR needed, so it works on iOS Safari too. The `enableAR*`
+helpers are sugar for `enablePermissions<Style>(['camera', 'sensors'])`: `enableARTap(message?)`,
+`enableARButton(text?, statusText?)`, `enableARCanvas(message?)`, `enableARBanner(message?,
+position?)`, `enableAROn(selector)`. The `'ar'` (or `'magicwindow'`) token works in combo lists
+too — `enablePermissionsTap(['ar'], msg)`. `window.arEnabled` is true once camera **and** sensors
+are granted, and an `ar` field is added to the `permissionsReady` event detail.
+
+```js
+const cam = createPhoneCamera('environment', false, 'cover'); // back camera, unmirrored, cover-fit
+cam.onReady(() => cam.attachBackground(scene));               // camera feed → scene.background
+enableARTap();                                                // camera + motion in one gesture
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (window.sensorsEnabled) applyDeviceRotation(camera, { smooth: 0.85 });
+  renderer.render(scene, camera);
+}
+// on resize, keep the background cover-fit:
+addEventListener('resize', () => cam.updateBackground());
+```
+
+`cam.attachBackground(scene)` sets `scene.background` to the cover-fit camera `VideoTexture` — call
+it inside `cam.onReady(...)` (the video must be live), and call `cam.updateBackground()` from your
+resize handler so it re-fits.
+
+> **iOS caveat:** a single tap produces **two** prompts in sequence — the motion-permission modal
+> first, then the camera prompt. Both must be accepted before `window.arEnabled` flips true.
+
+### WebXR immersive-ar (Android Chrome only)
+
+> **Android Chrome over HTTPS only.** iOS Safari does not support WebXR immersive-ar. On any
+> unsupported platform the `enableXR*` overlay/button rewrites itself to a "not supported" message
+> and never arms — so it degrades on its own.
+
+WebXR gives you the OS-level passthrough AR session with hit-testing. Only the **Tap**, **Button**,
+and **On** styles exist (no Canvas/Banner): `enableXRTap(message?, sessionInit?)`,
+`enableXRButton(text?, statusText?, sessionInit?)`, `enableXROn(selector, sessionInit?)`. three.js
+drives the session through `renderer.xr`, so **`setPhoneCanvas(renderer)` must run first**. Session
+defaults are `requiredFeatures: ['local']`, `optionalFeatures: ['hit-test', 'dom-overlay']`; any
+`sessionInit` you pass shallow-merges over these.
+
+Two hard rules for XR sketches: drive the loop with **`renderer.setAnimationLoop`** (not
+`requestAnimationFrame` — the XR display needs its own frame source), and **do not set
+`scene.background`** (passthrough requires it to stay `null`).
+
+```js
+setPhoneCanvas(renderer);   // required — lets the library reach renderer.xr
+enableXRTap('Tap to enter AR');
+
+renderer.setAnimationLoop((time, frame) => {
+  renderer.render(scene, camera);
+});
+```
+
+`isXRSupported()` returns a `Promise<boolean>` (cached on `window.xrSupported`); the flags
+`window.xrEnabled` / `window.xrActive` track the session and `endXR()` ends it. Read the current
+hit-test pose with `getXRHitPose(frame)` to drive a placement reticle:
+
+```js
+renderer.setAnimationLoop((time, frame) => {
+  const hit = getXRHitPose(frame); // { position, quaternion, matrix } | null
+  if (hit) {
+    reticle.visible = true;
+    reticle.position.copy(hit.position);
+    reticle.quaternion.copy(hit.quaternion);
+  } else {
+    reticle.visible = false;
+  }
+  renderer.render(scene, camera);
+});
+```
+
+In-session screen taps arrive as WebXR `select` events, not DOM touches — three-phone routes them
+to your global `touchStarted()`, so the same tap handler works in and out of AR. Optional
+`xrSessionStarted()` / `xrSessionEnded()` callbacks fire on session start/end.
+
+See `examples/AR Examples/magicWindow/*` (iOS + Android) and `examples/AR Examples/webxr/*`
+(Android Chrome) for full sketches.
+
 ## NFC
 
 ```js
@@ -342,6 +431,8 @@ unlockGestures();
 | NFC | ❌ | ✅ HTTPS | ❌ |
 | GPS | ✅ HTTPS | ✅ HTTPS | ✅ |
 | Camera / ML5 | ✅ | ✅ | ✅ |
+| Magic-window AR | ✅ | ✅ | ❌ |
+| WebXR immersive-ar | ❌ | ✅ Chrome | ❌ |
 | Vibration | ❌ | ✅ | ⚠️ |
 | Torch | ❌ | ✅ | ❌ |
 | BLE | Bluefy only | ✅ HTTPS | Chrome/Edge HTTPS |

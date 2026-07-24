@@ -89,6 +89,26 @@ window.THREEPHONE_EXAMPLES = [
     path: 'ml5/HandPose_two_points/', sourcePath: 'examples/ml5/HandPose_two_points', capabilities: ['camera', 'ml5', 'handpose'], platforms: ['iOS', 'Android', 'Desktop'],
     companion: { label: 'p5.js version (PHONE_HandPose)', href: P5PHONE_BASE + 'ml5/PHONE_HandPose_two_points/', absolute: true } },
 
+  // ---------- AR / XR ----------
+  { id: 'ar-look-around', title: 'Magic Window', category: 'AR / XR', subcategory: 'Magic Window', level: 'Intermediate', three: THREE_V,
+    description: 'A live camera feed plus gyro look-around: applyDeviceRotation() steers the view past a ring of floating shapes.',
+    path: 'AR%20Examples/magicWindow/01_look_around/', sourcePath: 'examples/AR%20Examples/magicWindow/01_look_around', capabilities: ['ar', 'camera', 'motion', 'orientation'], platforms: ['iOS', 'Android'] },
+  { id: 'ar-tap-to-place', title: 'Tap to Place', category: 'AR / XR', subcategory: 'Magic Window', level: 'Intermediate', three: THREE_V,
+    description: 'Tap to ray-place world-anchored objects over the camera feed with getTouchRaycaster().',
+    path: 'AR%20Examples/magicWindow/02_tap_to_place/', sourcePath: 'examples/AR%20Examples/magicWindow/02_tap_to_place', capabilities: ['ar', 'camera', 'motion', 'orientation', 'touch'], platforms: ['iOS', 'Android'] },
+  { id: 'ar-panorama', title: 'Panorama Viewer', category: 'AR / XR', subcategory: 'Magic Window', level: 'Starter', three: THREE_V,
+    description: 'Gyro look-around inside an inverted equirectangular sphere — no camera feed, just applyDeviceRotation().',
+    path: 'AR%20Examples/magicWindow/03_panorama/', sourcePath: 'examples/AR%20Examples/magicWindow/03_panorama', capabilities: ['ar', 'motion', 'orientation'], platforms: ['iOS', 'Android'] },
+  { id: 'ar-shake-physics', title: 'Shake Physics', category: 'AR / XR', subcategory: 'Magic Window', level: 'Intermediate', three: THREE_V,
+    description: 'Tap-placed objects fall under hand-rolled gravity; deviceShaken() flings them with a vibration kick.',
+    path: 'AR%20Examples/magicWindow/04_shake_physics/', sourcePath: 'examples/AR%20Examples/magicWindow/04_shake_physics', capabilities: ['ar', 'camera', 'motion', 'orientation', 'touch', 'deviceShaken', 'vibration', 'combined permissions'], platforms: ['iOS', 'Android'] },
+  { id: 'xr-enter-ar', title: 'Enter AR (WebXR)', category: 'AR / XR', subcategory: 'WebXR', level: 'Advanced', three: THREE_V,
+    description: 'A minimal immersive-ar starter: enableXRTap() requests a WebXR session on Android Chrome.',
+    path: 'AR%20Examples/webxr/01_enter_ar/', sourcePath: 'examples/AR%20Examples/webxr/01_enter_ar', capabilities: ['xr'], platforms: ['Android'] },
+  { id: 'xr-hit-test-place', title: 'Hit-Test Place (WebXR)', category: 'AR / XR', subcategory: 'WebXR', level: 'Advanced', three: THREE_V,
+    description: 'A WebXR hit-test reticle finds real surfaces; a select-tap drops anchored objects via getXRHitPose().',
+    path: 'AR%20Examples/webxr/02_hit_test_place/', sourcePath: 'examples/AR%20Examples/webxr/02_hit_test_place', capabilities: ['xr', 'hit-test', 'touch'], platforms: ['Android'] },
+
   // ---------- Output · Sound ----------
   { id: 'sound-dual-audio', title: 'Dual Audio (spatial)', category: 'Output', subcategory: 'Sound', level: 'Intermediate', three: THREE_V,
     description: 'Two orbs each carry THREE.PositionalAudio; an orbiting camera pans them left/right.',

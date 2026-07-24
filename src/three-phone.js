@@ -95,6 +95,10 @@ window.vibrationEnabled = false;
 window.speechEnabled = false;
 window.nfcEnabled = false;
 window.cameraEnabled = false;
+window.arEnabled = false;
+window.xrSupported = null; // null until isXRSupported() runs; then true/false
+window.xrEnabled = false;
+window.xrActive = false;
 window.torchEnabled = false;
 window.torchSupported = false;
 window.torchActive = false;
@@ -146,7 +150,7 @@ window.pmouseX = 0;
 window.pmouseY = 0;
 
 // three-phone version, for feature detection from sketches
-window.THREE_PHONE_VERSION = '0.1.0';
+window.THREE_PHONE_VERSION = '0.2.0';
 
 // Internal state
 let _nfcReader = null;
@@ -175,6 +179,13 @@ const _BLE_VALID_TYPES = new Set([
 
 // The three.js renderer canvas three-phone binds gestures / canvas-touch to.
 let _phoneCanvas = null;
+// The THREE.WebGLRenderer registered via setPhoneCanvas(renderer). WebXR needs
+// the renderer (not just its canvas) to drive renderer.xr.* — stashed lazily.
+let _phoneRenderer = null;
+// Active WebXR hit-test source (immersive-ar), stored so getXRHitPose() can read
+// it each frame. Reset when the session ends.
+let _xrHitTestSource = null;
+let _xrSession = null;
 
 // Web Audio state (mic metering + audio-context unlock). p5-phone leans on
 // p5.sound; three-phone uses the Web Audio API directly and resumes THREE's
@@ -240,6 +251,9 @@ function setPhoneCanvas(rendererOrCanvas) {
   if (!rendererOrCanvas) return null;
   if (rendererOrCanvas.domElement instanceof HTMLCanvasElement) {
     _phoneCanvas = rendererOrCanvas.domElement;
+    // A renderer was passed — keep it around so the WebXR helpers can reach
+    // renderer.xr.* without asking the sketch for it again.
+    _phoneRenderer = rendererOrCanvas;
   } else if (rendererOrCanvas instanceof HTMLCanvasElement) {
     _phoneCanvas = rendererOrCanvas;
   } else if (typeof rendererOrCanvas === 'string') {
@@ -527,6 +541,50 @@ function enableAllTap(message = 'Tap screen to enable motion sensors & microphon
     _notifySketchReady();
     console.log('✅ Motion sensors and microphone enabled via tap');
   });
+}
+
+// =========================================
+// MAGIC-WINDOW AR SUGAR — enableAR*()
+// Sensor-fused "hold the phone up and look through it" AR needs the same two
+// permissions every time: camera (the live feed behind the scene) + motion
+// sensors (to steer the camera). These wrappers ask for both in one gesture, so
+// sketches don't have to remember the pair. Not to be confused with WebXR
+// (enableXR*), which enters the OS-level immersive-ar session.
+// =========================================
+
+/**
+ * Enable magic-window AR (camera + motion sensors) with tap-to-start.
+ */
+function enableARTap(message = 'Tap to start AR') {
+  enablePermissionsTap(['camera', 'sensors'], message);
+}
+
+/**
+ * Enable magic-window AR (camera + motion sensors) with a button interface.
+ */
+function enableARButton(text = 'START AR', statusText) {
+  enablePermissionsButton(['camera', 'sensors'], text, statusText);
+}
+
+/**
+ * Enable magic-window AR (camera + motion sensors) on first canvas touch.
+ */
+function enableARCanvas(message = 'Tap to start AR') {
+  enablePermissionsCanvas(['camera', 'sensors'], message);
+}
+
+/**
+ * Enable magic-window AR (camera + motion sensors) with a banner.
+ */
+function enableARBanner(message = 'Tap to start AR', position = 'top') {
+  enablePermissionsBanner(['camera', 'sensors'], message, position);
+}
+
+/**
+ * Enable magic-window AR (camera + motion sensors) bound to a custom element.
+ */
+function enableAROn(selector) {
+  enablePermissionsOn(selector, ['camera', 'sensors']);
 }
 
 /**
@@ -2520,6 +2578,17 @@ function _normalizePermissionList(permissions) {
       continue;
     }
 
+    // Magic-window AR expands to the camera+sensors pair (see enableAR*). A
+    // compound branch, not an aliasMap entry, since aliasMap is strictly 1:1.
+    if (key === 'ar' || key === 'magicwindow') {
+      for (const defaultPermission of ['camera', 'sensors']) {
+        if (!normalized.includes(defaultPermission)) {
+          normalized.push(defaultPermission);
+        }
+      }
+      continue;
+    }
+
     const normalizedPermission = aliasMap[key];
     if (!normalizedPermission) {
       console.warn('three-phone: Unknown permission type:', permission);
@@ -2621,6 +2690,9 @@ function _notifySketchReady() {
     userSetupComplete();
   }
 
+  // Magic-window AR is "ready" once both of its ingredients are granted.
+  window.arEnabled = !!(window.cameraEnabled && window.sensorsEnabled);
+
   window.dispatchEvent(new CustomEvent('permissionsReady', {
     detail: {
       sensors: window.sensorsEnabled,
@@ -2632,6 +2704,8 @@ function _notifySketchReady() {
       nfc: window.nfcEnabled,
       geo: window.geoEnabled,
       camera: window.cameraEnabled,
+      ar: window.arEnabled,
+      xr: window.xrActive,
       gestures: window.gesturesLocked
     }
   }));
@@ -3502,6 +3576,7 @@ class PhoneCamera {
     this._bgMesh = null;
     this._bgWidth = 0;
     this._bgHeight = 0;
+    this._bgScene = null;  // scene whose .background we drive (attachBackground)
 
     if (!window._phoneCameras) window._phoneCameras = [];
     window._phoneCameras.push(this);
@@ -3791,14 +3866,18 @@ class PhoneCamera {
     return mesh;
   }
 
-  /** Re-fit the background texture (cover) to the canvas + video aspect. Call on resize. */
-  updateBackground() {
-    if (!this._bgMesh || !this._video || !window.THREE) return;
-    const tex = this._bgMesh.material.map;
-    if (!tex || !tex.repeat) return;
+  /**
+   * Cover-fit a texture's repeat/offset/center so the video fills a target
+   * rect without distortion (center-crop), honoring mirror. Shared by both the
+   * overlay-mesh path (updateBackground) and the scene.background path
+   * (attachBackground). No-op until three.js, the video, and a target size are
+   * all available.
+   */
+  _fitTextureCover(tex, targetW, targetH) {
+    if (!tex || !tex.repeat || !this._video || !window.THREE) return;
     const vw = this._video.videoWidth, vh = this._video.videoHeight;
-    if (!vw || !vh) return;
-    const Ac = this._bgWidth / this._bgHeight;
+    if (!vw || !vh || !targetW || !targetH) return;
+    const Ac = targetW / targetH;
     const Av = vw / vh;
     let rx = 1, ry = 1, ox = 0, oy = 0;
     if (Av > Ac) { rx = Ac / Av; ox = (1 - rx) / 2; }
@@ -3811,6 +3890,43 @@ class PhoneCamera {
     tex.offset.set(ox, oy);
     tex.needsUpdate = true;
   }
+
+  /**
+   * Use the camera feed as a scene's background (the simplest "camera behind my
+   * 3D scene" setup — no overlay mesh, no ortho camera). Sets scene.background
+   * to the VideoTexture and cover-fits it to the canvas. Call inside
+   * cam.onReady() so the video is live. Re-fits automatically on updateBackground().
+   * @param {THREE.Scene} scene
+   */
+  attachBackground(scene) {
+    const tex = this.getTexture();
+    if (!tex) {
+      debugError('PhoneCamera.attachBackground() needs three.js and a ready camera — call it inside cam.onReady().');
+      return;
+    }
+    if (!scene) {
+      debugError('PhoneCamera.attachBackground() requires a THREE.Scene.');
+      return;
+    }
+    scene.background = tex;
+    this._bgScene = scene;
+    const size = this._canvasSize();
+    this._fitTextureCover(tex, size.w, size.h);
+  }
+
+  /** Re-fit the background texture (cover) to the canvas + video aspect. Call on resize. */
+  updateBackground() {
+    if (!window.THREE) return;
+    // Overlay-mesh path (createBackgroundMesh): fit against the mesh's size.
+    if (this._bgMesh && this._bgMesh.material) {
+      this._fitTextureCover(this._bgMesh.material.map, this._bgWidth, this._bgHeight);
+    }
+    // scene.background path (attachBackground): re-fit against the live canvas.
+    if (this._bgScene && this._bgScene.background) {
+      const size = this._canvasSize();
+      this._fitTextureCover(this._bgScene.background, size.w, size.h);
+    }
+  }
 }
 
 /**
@@ -3822,6 +3938,319 @@ class PhoneCamera {
  */
 function createPhoneCamera(active = 'user', mirror = true, mode = 'fitHeight') {
   return new PhoneCamera(active, mirror, mode);
+}
+
+// =========================================
+// WEBXR - immersive-ar session helpers
+// enableXR* enters the OS-level WebXR immersive-ar session (Android Chrome), as
+// opposed to the sensor-fused magic-window AR of enableAR*. three.js drives the
+// session through renderer.xr.*, so setPhoneCanvas(renderer) must have run first.
+// Everything below is lazy — navigator.xr is never touched at load.
+// =========================================
+
+/**
+ * Whether this device can enter a WebXR immersive-ar session. Resolves false
+ * (never rejects) when WebXR is unavailable. Result is cached on
+ * window.xrSupported.
+ * @returns {Promise<boolean>}
+ */
+function isXRSupported() {
+  if (!navigator.xr || typeof navigator.xr.isSessionSupported !== 'function') {
+    window.xrSupported = false;
+    return Promise.resolve(false);
+  }
+  return navigator.xr.isSessionSupported('immersive-ar')
+    .then((ok) => { window.xrSupported = !!ok; return window.xrSupported; })
+    .catch(() => { window.xrSupported = false; return false; });
+}
+
+/**
+ * Read the latest WebXR hit-test pose for this animation frame. Returns null
+ * unless a frame, an active hit-test source, and three.js are all present.
+ * @param {XRFrame} frame - the frame passed to your renderer.setAnimationLoop callback
+ * @returns {{position: THREE.Vector3, quaternion: THREE.Quaternion, matrix: THREE.Matrix4}|null}
+ */
+function getXRHitPose(frame) {
+  if (!frame || !_xrHitTestSource || !window.THREE) return null;
+  const renderer = _phoneRenderer;
+  if (!renderer || !renderer.xr) return null;
+  const refSpace = renderer.xr.getReferenceSpace();
+  if (!refSpace) return null;
+  const results = frame.getHitTestResults(_xrHitTestSource);
+  if (!results || results.length === 0) return null;
+  const pose = results[0].getPose(refSpace);
+  if (!pose) return null;
+  const matrix = new window.THREE.Matrix4();
+  matrix.fromArray(pose.transform.matrix);
+  const position = new window.THREE.Vector3();
+  const quaternion = new window.THREE.Quaternion();
+  const scale = new window.THREE.Vector3();
+  matrix.decompose(position, quaternion, scale);
+  return { position, quaternion, matrix };
+}
+
+/** End the active WebXR session. Safe no-op when no session is running. */
+function endXR() {
+  if (_xrSession && typeof _xrSession.end === 'function') {
+    _xrSession.end();
+  }
+}
+
+/**
+ * Shared gesture handler: request the immersive-ar session and wire three.js +
+ * hit-test + event bridging to it. Returns true once the session is running.
+ * Called from inside the enableXR* tap/click handler (a user gesture).
+ * @returns {Promise<boolean>}
+ */
+async function _requestXRSessionCore(sessionInit) {
+  if (!navigator.xr || typeof navigator.xr.requestSession !== 'function') {
+    debugError('WebXR unavailable — navigator.xr.requestSession is missing.');
+    return false;
+  }
+  const renderer = _phoneRenderer;
+  if (!renderer || !renderer.xr) {
+    debugError('WebXR needs your THREE.WebGLRenderer — call setPhoneCanvas(renderer) in setup() before enableXR*.');
+    return false;
+  }
+
+  const defaults = {
+    requiredFeatures: ['local'],
+    optionalFeatures: ['hit-test', 'dom-overlay'],
+    domOverlay: { root: document.body }
+  };
+  const merged = Object.assign({}, defaults, sessionInit || {});
+
+  let session;
+  try {
+    session = await navigator.xr.requestSession('immersive-ar', merged);
+  } catch (err) {
+    debugError('WebXR requestSession failed: ' + (err && err.message ? err.message : err));
+    return false;
+  }
+
+  try {
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+  } catch (err) {
+    debugError('WebXR renderer.xr.setSession failed: ' + (err && err.message ? err.message : err));
+    return false;
+  }
+
+  _xrSession = session;
+
+  // Hit-test source, only when the feature was requested and the API exists.
+  // Its absence must never break session start, so the whole thing is guarded.
+  _xrHitTestSource = null;
+  try {
+    const optional = merged.optionalFeatures || [];
+    if (optional.indexOf('hit-test') !== -1 && typeof session.requestHitTestSource === 'function') {
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      const source = await session.requestHitTestSource({ space: viewerSpace });
+      _xrHitTestSource = source || null;
+    }
+  } catch (err) {
+    debugWarn('WebXR hit-test source unavailable: ' + (err && err.message ? err.message : err));
+    _xrHitTestSource = null;
+  }
+
+  window.xrEnabled = true;
+  window.xrActive = true;
+
+  if (typeof xrSessionStarted === 'function') {
+    try { xrSessionStarted(); } catch (e) { debugError('xrSessionStarted() threw: ' + (e && e.message ? e.message : e)); }
+  }
+
+  _notifySketchReady();
+
+  session.addEventListener('end', function () {
+    window.xrActive = false;
+    if (_xrHitTestSource && typeof _xrHitTestSource.cancel === 'function') {
+      _xrHitTestSource.cancel();
+    }
+    _xrHitTestSource = null;
+    _xrSession = null;
+    if (typeof xrSessionEnded === 'function') {
+      try { xrSessionEnded(); } catch (e) { debugError('xrSessionEnded() threw: ' + (e && e.message ? e.message : e)); }
+    }
+  });
+
+  session.addEventListener('select', function () {
+    // In immersive-ar, screen taps arrive as XR "select" events rather than DOM
+    // touch/pointer events — bridge them to the sketch's touchStarted().
+    if (typeof touchStarted === 'function') {
+      try { touchStarted(); } catch (e) { debugError('touchStarted() threw: ' + (e && e.message ? e.message : e)); }
+    }
+  });
+
+  return true;
+}
+
+/**
+ * Arm an XR entry control once support is confirmed. `control` supplies the DOM
+ * hooks the caller built: setText(str), arm(handler), remove(). When
+ * immersive-ar is unsupported we rewrite the label and never arm the gesture.
+ */
+function _armXRControl(control, sessionInit) {
+  let activating = false;
+  isXRSupported().then((supported) => {
+    if (!supported) {
+      control.setText('AR not supported on this device — use Android Chrome');
+      debugError('WebXR immersive-ar not supported on this device — use Android Chrome (or another WebXR-capable browser).');
+      return;
+    }
+    control.arm(async () => {
+      if (activating) return;
+      activating = true;
+      control.setText(control.busyText || 'Entering AR…');
+      const started = await _requestXRSessionCore(sessionInit);
+      if (started) {
+        control.remove();
+      } else {
+        activating = false;
+        control.setText(control.idleText);
+      }
+    });
+  });
+}
+
+/**
+ * Enter WebXR immersive-ar via a full-screen tap overlay.
+ * @param {string} [message='Tap to enter AR']
+ * @param {XRSessionInit} [sessionInit] - merged over the immersive-ar defaults
+ */
+function enableXRTap(message = 'Tap to enter AR', sessionInit) {
+  _removeExistingUI();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'tapOverlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999999;
+    cursor: pointer;
+    touch-action: manipulation;
+  `;
+
+  const messageDiv = document.createElement('div');
+  messageDiv.textContent = message;
+  messageDiv.style.cssText = `
+    color: white;
+    font-size: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    text-align: center;
+    padding: 40px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+  `;
+
+  overlay.appendChild(messageDiv);
+  document.body.appendChild(overlay);
+
+  _armXRControl({
+    idleText: message,
+    setText: (t) => { messageDiv.textContent = t; },
+    arm: (handler) => {
+      overlay.addEventListener('click', handler);
+      overlay.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+      overlay.addEventListener('pointerup', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+    },
+    remove: () => { if (overlay.parentNode) overlay.remove(); }
+  }, sessionInit);
+}
+
+/**
+ * Enter WebXR immersive-ar via a centered button.
+ * @param {string} [text='ENTER AR']
+ * @param {string} [statusText='Entering AR…'] - button label while the session starts
+ * @param {XRSessionInit} [sessionInit] - merged over the immersive-ar defaults
+ */
+function enableXRButton(text = 'ENTER AR', statusText = 'Entering AR…', sessionInit) {
+  _removeExistingUI();
+
+  const button = document.createElement('button');
+  button.id = 'permissionButton';
+  button.textContent = text;
+  button.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 20px 40px;
+    font-size: 18px;
+    font-weight: bold;
+    background: linear-gradient(135deg, #7c4dff 0%, #6a1b9a 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    z-index: 999999;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    transition: transform 0.2s ease;
+    touch-action: manipulation;
+  `;
+
+  button.addEventListener('mouseenter', () => {
+    button.style.transform = 'translate(-50%, -50%) scale(1.05)';
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.transform = 'translate(-50%, -50%) scale(1)';
+  });
+
+  document.body.appendChild(button);
+
+  _armXRControl({
+    idleText: text,
+    busyText: statusText,
+    setText: (t) => { button.textContent = t; },
+    arm: (handler) => {
+      button.addEventListener('click', handler);
+      button.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+      button.addEventListener('pointerup', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+    },
+    remove: () => { if (button.parentNode) button.remove(); }
+  }, sessionInit);
+}
+
+/**
+ * Enter WebXR immersive-ar from a tap on your own element (by CSS selector).
+ * @param {string} selector
+ * @param {XRSessionInit} [sessionInit] - merged over the immersive-ar defaults
+ */
+function enableXROn(selector, sessionInit) {
+  const attach = () => {
+    const element = document.querySelector(selector);
+    if (!element) {
+      console.warn(`three-phone: Element "${selector}" not found. Retrying...`);
+      setTimeout(attach, 100);
+      return;
+    }
+    _armXRControl({
+      idleText: '',
+      setText: () => {},   // leave the user's own element text untouched
+      arm: (handler) => {
+        element.addEventListener('click', handler);
+        element.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+      },
+      remove: () => {}     // leave the user's element in place
+    }, sessionInit);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attach);
+  } else {
+    attach();
+  }
 }
 
 // =========================================
@@ -3870,6 +4299,8 @@ window.enableBleTap = enableBleTap;
 window.enableBleButton = enableBleButton;
 window.enableAllTap = enableAllTap;
 window.enableAllButton = enableAllButton;
+window.enableARTap = enableARTap;
+window.enableARButton = enableARButton;
 window.enablePermissionsTap = enablePermissionsTap;
 window.enablePermissionsButton = enablePermissionsButton;
 window.enableHardwareTap = enablePermissionsTap;
@@ -3888,6 +4319,7 @@ window.enableNfcCanvas = enableNfcCanvas;
 window.enableGeoCanvas = enableGeoCanvas;
 window.enableBleCanvas = enableBleCanvas;
 window.enableAllCanvas = enableAllCanvas;
+window.enableARCanvas = enableARCanvas;
 window.enableCameraCanvas = enableCameraCanvas;
 window.enablePermissionsCanvas = enablePermissionsCanvas;
 window.enableHardwareCanvas = enablePermissionsCanvas;
@@ -3905,6 +4337,7 @@ window.enableNfcBanner = enableNfcBanner;
 window.enableGeoBanner = enableGeoBanner;
 window.enableBleBanner = enableBleBanner;
 window.enableAllBanner = enableAllBanner;
+window.enableARBanner = enableARBanner;
 window.enableCameraBanner = enableCameraBanner;
 window.enablePermissionsBanner = enablePermissionsBanner;
 window.enableHardwareBanner = enablePermissionsBanner;
@@ -3922,6 +4355,7 @@ window.enableNfcOn = enableNfcOn;
 window.enableGeoOn = enableGeoOn;
 window.enableBleOn = enableBleOn;
 window.enableAllOn = enableAllOn;
+window.enableAROn = enableAROn;
 window.enableCameraOn = enableCameraOn;
 window.enablePermissionsOn = enablePermissionsOn;
 window.enableHardwareOn = enablePermissionsOn;
@@ -3982,6 +4416,14 @@ window.screenToWorld = screenToWorld;
 
 // Camera (the PhoneCamera engine and camera permission core land in a later commit)
 window.createPhoneCamera = createPhoneCamera;
+
+// WebXR (immersive-ar session helpers)
+window.enableXRTap = enableXRTap;
+window.enableXRButton = enableXRButton;
+window.enableXROn = enableXROn;
+window.isXRSupported = isXRSupported;
+window.getXRHitPose = getXRHitPose;
+window.endXR = endXR;
 
 // Install the touch subsystem immediately (no permission needed, like p5).
 _installTouchListeners();

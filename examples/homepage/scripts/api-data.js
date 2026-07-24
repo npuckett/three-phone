@@ -9,6 +9,8 @@ window.THREEPHONE_PERMISSION_MATRIX = [
   { capability: 'GPS / geolocation', status: 'window.geoEnabled', tap: 'enableGeoTap(message)', button: 'enableGeoButton(text)', canvas: 'enableGeoCanvas(message)', banner: 'enableGeoBanner(message, position)', custom: 'enableGeoOn(selector)', notes: 'iOS Safari + Android Chrome over HTTPS. Coarse by default; setGeoOptions({ enableHighAccuracy: true }) for real GPS. Use geoRead(position).' },
   { capability: 'Bluetooth (BLE)', status: 'window.bleConnected', tap: 'enableBleTap(options?)', button: 'enableBleButton(options?)', canvas: 'enableBleCanvas(options?)', banner: 'enableBleBanner(options?)', custom: 'enableBleOn(selector)', notes: 'Call bleSetup() first. Chrome/Edge over HTTPS. iOS: Bluefy browser.' },
   { capability: 'Camera', status: 'window.cameraEnabled || cam.ready', tap: 'enableCameraTap(message)', button: 'enableCameraButton(text)', canvas: 'enableCameraCanvas(message)', banner: 'enableCameraBanner(message, position)', custom: 'enableCameraOn(selector)', notes: 'Pair with createPhoneCamera(); use cam.getTexture() / cam.createBackgroundMesh() to show the feed in three.js.' },
+  { capability: 'AR (camera + sensors)', status: 'window.arEnabled', tap: 'enableARTap(message)', button: 'enableARButton(text)', canvas: 'enableARCanvas(message)', banner: 'enableARBanner(message, position)', custom: 'enableAROn(selector)', notes: "Sugar for enablePermissionsTap(['camera','sensors']). iOS shows two prompts (motion, then camera) from one tap." },
+  { capability: 'WebXR immersive-ar', status: 'window.xrActive', tap: 'enableXRTap(message)', button: 'enableXRButton(text)', canvas: '—', banner: '—', custom: 'enableXROn(selector)', notes: 'Android Chrome over HTTPS only. Session request must happen inside the gesture; use renderer.setAnimationLoop.' },
   { capability: 'Motion + microphone', status: 'window.sensorsEnabled && window.micEnabled', tap: 'enableAllTap(message)', button: 'enableAllButton(text)', canvas: 'enableAllCanvas(message)', banner: 'enableAllBanner(message, position)', custom: 'enableAllOn(selector)', notes: 'Convenience flow for sketches that need both sensors and mic.' },
   { capability: 'Any combination', status: 'depends on selected permissions', tap: "enablePermissionsTap(['sensors', 'torch'])", button: "enablePermissionsButton(['torch', 'vibration'], text)", canvas: "enablePermissionsCanvas(['camera', 'mic'])", banner: "enablePermissionsBanner(['sensors', 'nfc'], msg)", custom: "enablePermissionsOn(selector, ['camera', 'mic'])", notes: 'Use sensors, mic, sound, speech, vibration, torch, nfc, geo, and camera in any combination. enableHardware* aliases also work.' }
 ];
@@ -92,6 +94,38 @@ window.THREEPHONE_API_SECTIONS = [
       { name: 'cam.getTexture', signature: 'cam.getTexture()', summary: 'A lazily-created THREE.VideoTexture of the feed (sRGB).', tags: ['camera'] },
       { name: 'cam.createBackgroundMesh', signature: 'cam.createBackgroundMesh(width?, height?)', summary: 'A screen-filling plane with the camera texture for an ortho overlay. Call cam.updateBackground() on resize.', tags: ['camera'] },
       { name: 'cam.mapKeypoints', signature: 'cam.mapKeypoints(keypoints)', summary: 'Map ml5 keypoints from video space to canvas coordinates (mirror-aware). Also mapPoint / mapKeypoint / mapBox(es).', tags: ['camera', 'ml5'] }
+    ]
+  },
+  {
+    id: 'ar',
+    title: 'Magic-Window AR',
+    description: 'Camera-feed AR that runs in any mobile browser: a live rear-camera background plus gyro look-around, no WebXR required. Enable it from a user tap, then attach the feed behind your scene.',
+    relatedApis: [
+      { label: 'THREE.VideoTexture', href: 'https://threejs.org/docs/#api/en/textures/VideoTexture', summary: 'The camera feed PhoneCamera.attachBackground() renders behind the scene.' },
+      { label: 'DeviceOrientationEvent', href: 'https://developer.mozilla.org/en-US/docs/Web/API/DeviceOrientationEvent', summary: 'The sensor behind applyDeviceRotation() look-around.' }
+    ],
+    items: [
+      { name: 'enableARTap', signature: 'enableARTap(message)', summary: "One tap requests both camera and motion for magic-window AR. Full family: enableARButton(text), enableARCanvas(message), enableARBanner(message, position), enableAROn(selector). The 'ar' token also works in enablePermissionsTap(['ar', 'vibration']) and friends.", tags: ['tap', 'ar', 'camera', 'motion'] },
+      { name: 'cam.attachBackground', signature: 'cam.attachBackground(scene)', summary: 'Set the PhoneCamera feed as a screen-filling scene background. Call it inside cam.onReady(); call cam.updateBackground() on resize.', tags: ['ar', 'camera'] },
+      { name: 'applyDeviceRotation', signature: 'applyDeviceRotation(camera, { smooth })', summary: 'Drive the camera (or any Object3D) from device attitude for look-around. smooth (0..~0.9) slerps for a softer follow. Shared with Motion Sensors.', tags: ['ar', 'motion', 'orientation'] },
+      { name: 'window.arEnabled', signature: 'if (window.arEnabled) { ... }', summary: 'True once camera and motion are both active for the magic-window flow.', tags: ['status', 'ar'] }
+    ]
+  },
+  {
+    id: 'xr',
+    title: 'WebXR (immersive-ar)',
+    description: 'True immersive-ar sessions via the WebXR Device API on Android Chrome. Note: drive the scene with renderer.setAnimationLoop (not requestAnimationFrame), do not set scene.background, and serve over HTTPS — Android Chrome only.',
+    relatedApis: [
+      { label: 'WebXR Device API', href: 'https://developer.mozilla.org/en-US/docs/Web/API/WebXR_Device_API', summary: 'The underlying immersive-ar session API.' },
+      { label: 'WebXR Hit Test', href: 'https://developer.mozilla.org/en-US/docs/Web/API/XRHitTestResult', summary: 'Real-surface hits that getXRHitPose() reads from the frame.' }
+    ],
+    items: [
+      { name: 'enableXRTap', signature: 'enableXRTap(message)', summary: 'One tap requests an immersive-ar session. Also enableXRButton(text) and enableXROn(selector). The session request must happen inside the gesture.', tags: ['tap', 'xr'] },
+      { name: 'isXRSupported', signature: 'isXRSupported() // Promise<boolean>', summary: 'Resolve whether immersive-ar is available before offering an XR entry point.', tags: ['xr'] },
+      { name: 'getXRHitPose', signature: 'getXRHitPose(frame)', summary: 'Read the current hit-test pose from the XRFrame for reticle placement. Use it inside the setAnimationLoop callback.', tags: ['xr', 'hit-test'] },
+      { name: 'endXR', signature: 'endXR()', summary: 'End the active immersive-ar session. xrSessionStarted() / xrSessionEnded() callbacks fire on entry and exit.', tags: ['xr'] },
+      { name: 'xrSupported / xrEnabled / xrActive', signature: 'if (window.xrActive) { ... }', summary: 'Status flags: xrSupported (device capable), xrEnabled (helper armed), xrActive (session running). XR select events route through touchStarted().', tags: ['status', 'xr'] },
+      { name: 'Render loop & setup', signature: 'renderer.setAnimationLoop(render)', summary: 'WebXR requires renderer.setAnimationLoop — not requestAnimationFrame. Do not set scene.background (the passthrough camera shows through). Android Chrome over HTTPS only.', tags: ['xr'] }
     ]
   },
   {

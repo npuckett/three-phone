@@ -52,7 +52,7 @@ vm.runInContext(src, sandbox, { filename: 'three-phone.js' });
 
 // The public API three-phone promises. Grouped for readable failures.
 const FEATURES = ['Gyro', 'Sensor', 'Mic', 'Sound', 'Speech', 'Vibration',
-  'Torch', 'Flashlight', 'Nfc', 'Geo', 'Ble', 'Camera', 'All',
+  'Torch', 'Flashlight', 'Nfc', 'Geo', 'Ble', 'Camera', 'AR', 'All',
   'Permissions', 'Hardware'];
 const STYLES = ['Tap', 'Button', 'Canvas', 'Banner', 'On'];
 
@@ -76,6 +76,8 @@ const expected = new Set([
   'getAudioContext', 'getMicLevel', 'getMicStream',
   // Camera
   'createPhoneCamera',
+  // WebXR (immersive-ar)
+  'enableXRTap', 'enableXRButton', 'enableXROn', 'isXRSupported', 'getXRHitPose', 'endXR',
   // Motion thresholds + three.js helpers
   'setMoveThreshold', 'setShakeThreshold', 'getRotationQuaternion',
   'getRotationEuler', 'applyDeviceRotation', 'getTouchRaycaster', 'screenToWorld'
@@ -103,6 +105,8 @@ const statusGlobals = ['sensorsEnabled', 'micEnabled', 'soundEnabled', 'gestures
   'vibrationEnabled', 'speechEnabled', 'nfcEnabled', 'cameraEnabled', 'torchEnabled',
   'bleSupported', 'bleConnected', 'bleValues', 'geoEnabled', 'lastGeoPosition',
   'micLevel', 'THREE_PHONE_VERSION',
+  // AR / WebXR status
+  'arEnabled', 'xrSupported', 'xrEnabled', 'xrActive',
   // Motion + touch data globals
   'rotationX', 'rotationY', 'rotationZ', 'pRotationX', 'pRotationY', 'pRotationZ',
   'accelerationX', 'accelerationY', 'accelerationZ',
