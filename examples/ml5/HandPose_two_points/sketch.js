@@ -28,14 +28,15 @@ function init() {
   animate();
 }
 
-function onCameraReady() {
+async function onCameraReady() {
   R.scene.add(cam.createBackgroundMesh(innerWidth, innerHeight));
   showMl5LoadingOverlay('Loading HandPose…');
-  handPose = ml5.handPose({ flipped: false }, () => {
-    hideMl5LoadingOverlay();
-    handPose.detectStart(cam.videoElement, (results) => { hands = results; });
-    debug('HandPose ready — show your hand');
-  });
+  // No p5 on the page, so ml5 v1 constructors return a Promise that resolves to the
+  // model (the callback form only hands the model to the callback). Await it.
+  handPose = await ml5.handPose({ flipped: false });
+  hideMl5LoadingOverlay();
+  handPose.detectStart(cam.videoElement, (results) => { hands = results; });
+  debug('HandPose ready — show your hand');
 }
 
 function hideAll() { jointA.visible = jointB.visible = boneMesh.visible = false; }

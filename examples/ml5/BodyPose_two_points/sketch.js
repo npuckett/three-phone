@@ -27,14 +27,15 @@ function init() {
   animate();
 }
 
-function onCameraReady() {
+async function onCameraReady() {
   R.scene.add(cam.createBackgroundMesh(innerWidth, innerHeight));
   showMl5LoadingOverlay('Loading BodyPose…');
-  bodyPose = ml5.bodyPose('MoveNet', { flipped: false }, () => {
-    hideMl5LoadingOverlay();
-    bodyPose.detectStart(cam.videoElement, (results) => { poses = results; });
-    debug('BodyPose ready — step back so your body is visible');
-  });
+  // No p5 on the page, so ml5 v1 constructors return a Promise that resolves to the
+  // model (the callback form only hands the model to the callback). Await it.
+  bodyPose = await ml5.bodyPose('MoveNet', { flipped: false });
+  hideMl5LoadingOverlay();
+  bodyPose.detectStart(cam.videoElement, (results) => { poses = results; });
+  debug('BodyPose ready — step back so your body is visible');
 }
 
 function hideAll() { jointA.visible = jointB.visible = boneMesh.visible = false; }

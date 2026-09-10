@@ -92,6 +92,7 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 **Camera** → `cam = createPhoneCamera(active, mirror, mode)`, `enableCameraTap()`,
 `cam.onReady(cb)`, `cam.getTexture()`, `cam.createBackgroundMesh()`, `cam.mapKeypoints(kps)`
 (video→canvas coords for ml5), `cam.videoElement` (feed ml5). Init is deferred to the gesture.
+No p5 here, so ml5 v1 constructors return a Promise: `model = await ml5.handPose(opts)`.
 
 **AR (magic window)** (iOS + Android) → `cam = createPhoneCamera('environment', false, 'cover')`,
 `cam.onReady(() => cam.attachBackground(scene))` (camera feed → `scene.background`),

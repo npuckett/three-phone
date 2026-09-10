@@ -252,6 +252,10 @@ enableCameraTap();
 The camera is created but not started until the `enableCamera*` gesture (fixes an iOS
 rotation bug). See the `examples/ml5/*` sketches for BodyPose / FaceMesh / HandPose.
 
+**ml5 note:** without p5 on the page, ml5 v1 constructors return a Promise, so write
+`model = await ml5.handPose(opts)` (or use the model passed to the callback) before
+calling `model.detectStart(cam.videoElement, cb)`.
+
 ## AR / XR
 
 Two paths to augmented reality, for two different capabilities. **Magic-window AR** fuses the

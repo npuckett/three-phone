@@ -27,14 +27,15 @@ function init() {
   animate();
 }
 
-function onCameraReady() {
+async function onCameraReady() {
   R.scene.add(cam.createBackgroundMesh(innerWidth, innerHeight));
   showMl5LoadingOverlay('Loading FaceMesh…');
-  faceMesh = ml5.faceMesh({ maxFaces: 1, flipped: false }, () => {
-    hideMl5LoadingOverlay();
-    faceMesh.detectStart(cam.videoElement, (results) => { faces = results; });
-    debug('FaceMesh ready — look at the camera');
-  });
+  // No p5 on the page, so ml5 v1 constructors return a Promise that resolves to the
+  // model (the callback form only hands the model to the callback). Await it.
+  faceMesh = await ml5.faceMesh({ maxFaces: 1, flipped: false });
+  hideMl5LoadingOverlay();
+  faceMesh.detectStart(cam.videoElement, (results) => { faces = results; });
+  debug('FaceMesh ready — look at the camera');
 }
 
 function hideAll() { jointA.visible = jointB.visible = boneMesh.visible = false; }
