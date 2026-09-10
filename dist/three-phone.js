@@ -3855,9 +3855,13 @@ class PhoneCamera {
     const H = height || size.h;
     const tex = this.getTexture();
     const geo = new window.THREE.PlaneGeometry(W, H);
-    const mat = new window.THREE.MeshBasicMaterial({ map: tex, depthTest: false, depthWrite: false });
+    // DoubleSide: the y-down overlay camera (top=0, bottom=H) flips winding, which
+    // would otherwise back-face-cull the plane. scale.y = -1 restores the image's
+    // vertical orientation under that flipped projection.
+    const mat = new window.THREE.MeshBasicMaterial({ map: tex, depthTest: false, depthWrite: false, side: window.THREE.DoubleSide });
     const mesh = new window.THREE.Mesh(geo, mat);
     mesh.position.set(W / 2, H / 2, -10);
+    mesh.scale.y = -1;
     mesh.renderOrder = -1;
     this._bgMesh = mesh;
     this._bgWidth = W;
@@ -3879,15 +3883,17 @@ class PhoneCamera {
     if (!vw || !vh || !targetW || !targetH) return;
     const Ac = targetW / targetH;
     const Av = vw / vh;
-    let rx = 1, ry = 1, ox = 0, oy = 0;
-    if (Av > Ac) { rx = Ac / Av; ox = (1 - rx) / 2; }
-    else { ry = Av / Ac; oy = (1 - ry) / 2; }
-    if (this._mirror) { rx = -Math.abs(rx); ox = 1 - ox; }
+    // With tex.center at (0.5, 0.5) the repeat already crops around the middle,
+    // so no offset is needed; a negative x repeat mirrors about that same center.
+    let rx = 1, ry = 1;
+    if (Av > Ac) rx = Ac / Av;
+    else ry = Av / Ac;
+    if (this._mirror) rx = -rx;
     tex.wrapS = window.THREE.ClampToEdgeWrapping;
     tex.wrapT = window.THREE.ClampToEdgeWrapping;
     tex.center.set(0.5, 0.5);
     tex.repeat.set(rx, ry);
-    tex.offset.set(ox, oy);
+    tex.offset.set(0, 0);
     tex.needsUpdate = true;
   }
 
