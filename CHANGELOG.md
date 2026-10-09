@@ -6,16 +6,7 @@ All notable changes to three-phone are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- **Camera background invisible / off-center on phones** — `createBackgroundMesh()` is now
-  double-sided with a y-flipped plane, so the y-down overlay camera the ml5 and camera examples use
-  no longer back-face-culls it (black screen). The cover-fit math in `updateBackground()` /
-  `attachBackground()` no longer double-applies the centering offset: portrait phones showed the
-  right third of the frame, and mirrored (front-camera) feeds sampled off the texture entirely.
-- **ml5 examples** — await `ml5.faceMesh/handPose/bodyPose(...)`; without p5 on the page the ml5 v1
-  constructors return a Promise, so the callback pattern threw `detectStart is not a function`.
-
-## [0.2.0]
+## [0.2.0] - 2026-10-08
 
 Augmented-reality release: magic-window AR everywhere, plus WebXR immersive-ar on Android Chrome.
 
@@ -38,7 +29,16 @@ Augmented-reality release: magic-window AR everywhere, plus WebXR immersive-ar o
   (`01_enter_ar`, `02_hit_test_place`, Android Chrome).
 - **AR / XR** catalog category in the docs/example gallery.
 
-## [0.1.0] - Unreleased
+### Fixed
+- **Camera background invisible / off-center on phones** — `createBackgroundMesh()` is now
+  double-sided with a y-flipped plane, so the y-down overlay camera the ml5 and camera examples use
+  no longer back-face-culls it (black screen). The cover-fit math in `updateBackground()` /
+  `attachBackground()` no longer double-applies the centering offset: portrait phones showed the
+  right third of the frame, and mirrored (front-camera) feeds sampled off the texture entirely.
+- **ml5 examples** — await `ml5.faceMesh/handPose/bodyPose(...)`; without p5 on the page the ml5 v1
+  constructors return a Promise, so the callback pattern threw `detectStart is not a function`.
+
+## [0.1.0] - 2026-07-23
 
 Initial release: a three.js companion to [p5-phone](https://github.com/npuckett/p5-phone)
 with the same permission model and sensor API names.
