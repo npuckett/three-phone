@@ -6,7 +6,8 @@
 // camera feed sits behind the scene so the shapes feel pinned in your room.
 //
 // three-phone APIs: createPhoneCamera() + cam.attachBackground() (camera feed
-// as scene.background), enableARTap() (camera + motion in one tap),
+// as scene.background), enablePermissionsTap(['sensors', 'camera']) (motion
+// + camera in one tap),
 // applyDeviceRotation() (drives the camera from the gyroscope),
 // setPhoneCanvas(), lockGestures(), showDebug(), window.arEnabled.
 // Platforms: iOS Safari + Android Chrome (HTTPS required for camera + sensors).
