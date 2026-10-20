@@ -119,6 +119,8 @@ body.qr-card-open { overflow: hidden; }
 .api-card h4, .example-card h4 { margin: 0 0 8px; font-size: 1.05rem; }
 .api-signature { color: var(--accent-blue); font-weight: 750; overflow-wrap: anywhere; }
 .example-meta, .api-card p, .example-card p { color: var(--muted); }
+/* Card text holds long code names with no spaces. Let them break, so a phone page can't scroll sideways. */
+.api-card p, .example-card p, .related-api-list span { overflow-wrap: anywhere; }
 .example-meta { font-size: 0.9rem; margin-bottom: 10px; }
 .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .tag { display: inline-flex; border-radius: 999px; background: var(--highlight); border: 1px solid var(--line); color: var(--muted); padding: 4px 8px; font-size: 0.78rem; font-weight: 700; }

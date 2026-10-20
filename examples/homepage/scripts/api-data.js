@@ -184,7 +184,7 @@ window.THREEPHONE_API_SECTIONS = [
     title: 'Torch / Flashlight',
     description: 'Control the rear-camera torch on Android Chrome.',
     relatedApis: [
-      { label: 'MediaStreamTrack torch', href: 'https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints/torch', summary: 'The underlying track constraint.' }
+      { label: 'MediaStreamTrack torch', href: 'https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints#torch', summary: 'The underlying track constraint.' }
     ],
     items: [
       { name: 'enableTorchTap', signature: 'enableTorchTap(message)', summary: 'Start the rear camera stream for torch control.', tags: ['tap', 'torch'] },
