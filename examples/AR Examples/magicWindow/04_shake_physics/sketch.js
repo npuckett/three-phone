@@ -6,8 +6,8 @@
 // to fling everything into the air with a haptic buzz.
 //
 // three-phone APIs: createPhoneCamera() + cam.attachBackground(),
-// enablePermissionsTap(['ar','vibration']) (camera + motion + haptics in one
-// tap), touchStarted(), getTouchRaycaster(), applyDeviceRotation(),
+// enablePermissionsTap(['sensors','camera','vibration']) (motion + camera +
+// haptics in one tap), touchStarted(), getTouchRaycaster(), applyDeviceRotation(),
 // deviceShaken() + setShakeThreshold() + vibrate(), accelerationX/Y,
 // setPhoneCanvas(), lockGestures(), showDebug(), window.arEnabled.
 // Platforms: iOS Safari + Android Chrome (HTTPS required for camera + sensors).
@@ -43,7 +43,8 @@ function init() {
 
   showDebug();
   setPhoneCanvas(renderer);
-  enablePermissionsTap(['ar', 'vibration'], 'Tap to start');
+  // Motion goes first. An iPhone only asks for motion straight from the tap.
+  enablePermissionsTap(['sensors', 'camera', 'vibration'], 'Tap to start');
   setShakeThreshold(25);
   lockGestures();
   addEventListener('resize', onResize);

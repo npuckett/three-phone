@@ -5,10 +5,11 @@
 // the direction you are aiming; it stays world-anchored as you look around.
 // The rear camera feed is the background, so shapes appear to float in space.
 //
-// three-phone APIs: createPhoneCamera() + cam.attachBackground(), enableARTap()
-// (camera + motion in one tap), touchStarted() callback,
-// getTouchRaycaster() (screen tap → ray), applyDeviceRotation(),
-// setPhoneCanvas(), lockGestures(), showDebug(), window.arEnabled.
+// three-phone APIs: createPhoneCamera() + cam.attachBackground(),
+// enablePermissionsTap(['sensors','camera']) (motion + camera in one tap),
+// touchStarted() callback, getTouchRaycaster() (screen tap → ray),
+// applyDeviceRotation(), setPhoneCanvas(), lockGestures(), showDebug(),
+// window.arEnabled.
 // Platforms: iOS Safari + Android Chrome (HTTPS required for camera + sensors).
 // ==============================================
 
@@ -41,7 +42,8 @@ function init() {
 
   showDebug();
   setPhoneCanvas(renderer);
-  enableARTap('Tap to start AR');
+  // Motion goes first. An iPhone only asks for motion straight from the tap.
+  enablePermissionsTap(['sensors', 'camera'], 'Tap to start AR');
   lockGestures();
   addEventListener('resize', onResize);
   animate();

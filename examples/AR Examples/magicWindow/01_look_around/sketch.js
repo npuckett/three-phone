@@ -68,7 +68,8 @@ function init() {
 
   showDebug();
   setPhoneCanvas(renderer);
-  enableARTap('Tap to start AR');
+  // Motion goes first. An iPhone only asks for motion straight from the tap.
+  enablePermissionsTap(['sensors', 'camera'], 'Tap to start AR');
   lockGestures();
   addEventListener('resize', onResize);
   animate();
