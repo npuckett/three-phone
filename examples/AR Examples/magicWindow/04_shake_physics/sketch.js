@@ -2,8 +2,9 @@
 // SHAKE PHYSICS
 // ==============================================
 // Tap to drop shapes into the room (like Tap to Place), but now they fall,
-// bounce off an invisible floor, and drift with your motion. Shake the phone
-// to fling everything into the air with a haptic buzz.
+// bounce off an invisible floor, and drift a little with your motion. Shake
+// the phone to toss them up with a haptic buzz. Each shape is pulled back
+// toward the spot where you dropped it, so it lands there again.
 //
 // three-phone APIs: createPhoneCamera() + cam.attachBackground(),
 // enablePermissionsTap(['sensors','camera','vibration']) (motion + camera +
@@ -17,6 +18,10 @@ let renderer, scene, camera, cam, raycaster;
 let bodies = [];
 const MAX = 30;
 const FLOOR = -1.5;      // invisible floor plane (metres below eye level)
+const PULL = 3;          // how hard each shape is pulled back to its spot
+const MAX_SPEED = 8;     // m/s, so nothing flies off
+const SHAKE_COOLDOWN = 600; // ms. One shake fires deviceShaken() many times.
+let lastShake = 0;
 const _ray = new THREE.Vector3();
 
 function init() {
@@ -72,6 +77,7 @@ function touchStarted() {
   );
   mesh.position.copy(_ray);
   mesh.userData.vel = new THREE.Vector3();
+  mesh.userData.home = mesh.position.clone(); // the spot it comes back to
   bodies.push(mesh);
   scene.add(mesh);
 
@@ -85,12 +91,17 @@ function touchStarted() {
   debug(bodies.length + ' bodies');
 }
 
-// Shake: fling everything with a random impulse + a haptic buzz.
+// Shake: toss everything up with a haptic buzz. One shake counts once.
 function deviceShaken() {
+  const now = performance.now();
+  if (now - lastShake < SHAKE_COOLDOWN) return;
+  lastShake = now;
+
   for (const b of bodies) {
-    b.userData.vel.x += (Math.random() - 0.5) * 6;
-    b.userData.vel.y += Math.random() * 6 + 2;
-    b.userData.vel.z += (Math.random() - 0.5) * 6;
+    if (b.position.y > FLOOR + 0.5) continue;      // still in the air, leave it
+    b.userData.vel.y = 4 + Math.random();          // up about 1 to 1.5 m
+    b.userData.vel.x += (Math.random() - 0.5) * 1; // a little sideways
+    b.userData.vel.z += (Math.random() - 0.5) * 1;
   }
   vibrate(80);
   debug('shake!');
@@ -107,12 +118,19 @@ function animate() {
     v.y += gravity * dt;
 
     // Nudge with real-world motion once sensors are live.
+    // Capped at 3, so a hard shake can't push shapes out of view.
     if (window.arEnabled) {
-      v.x += accelerationX * dt * 0.5;
-      v.y += accelerationY * dt * 0.5;
+      v.x += THREE.MathUtils.clamp(accelerationX, -3, 3) * dt * 0.5;
+      v.y += THREE.MathUtils.clamp(accelerationY, -3, 3) * dt * 0.5;
     }
 
+    // Pull gently back toward the spot where it was dropped.
+    const home = b.userData.home;
+    v.x += (home.x - b.position.x) * PULL * dt;
+    v.z += (home.z - b.position.z) * PULL * dt;
+
     v.multiplyScalar(0.99);                 // mild air drag
+    v.clampLength(0, MAX_SPEED);            // speed limit
     b.position.addScaledVector(v, dt);
 
     if (b.position.y < FLOOR) {             // damped bounce off the floor
