@@ -5,7 +5,7 @@
 sensor API names, redesigned to drive real 3D scenes.
 
 Point your phone's motion sensors, touch, microphone, camera, GPS, NFC, Bluetooth, torch,
-and vibration at a WebGL scene without wrestling with iOS permission prompts, gesture
+and vibration at a WebGL scene, and share one scene across many phones, without wrestling with iOS permission prompts, gesture
 locking, or `DeviceOrientationEvent` quirks.
 
 - 📚 **Docs & example gallery:** https://npuckett.github.io/three-phone/examples/homepage/
@@ -27,6 +27,8 @@ locking, or `DeviceOrientationEvent` quirks.
 - [NFC](#nfc)
 - [GPS / geolocation](#gps--geolocation)
 - [Bluetooth (BLE)](#bluetooth-ble)
+- [Share (many phones, one room)](#share-many-phones-one-room)
+- [Keep the screen on](#keep-the-screen-on)
 - [Vibration](#vibration)
 - [Torch / flashlight](#torch--flashlight)
 - [Debug console](#debug-console)
@@ -128,7 +130,7 @@ strict about it). three-phone gives every capability the same five activation st
 | **On** | `enableGyroOn(selector)` | binds to your own HTML element |
 
 Features: **Gyro/Sensor**, **Mic**, **Sound**, **Speech**, **Vibration**, **Torch**
-(`Flashlight` aliases), **Nfc**, **Geo**, **Ble**, **Camera**, **All** (sensors+mic), and
+(`Flashlight` aliases), **Nfc**, **Geo**, **Ble**, **Share**, **Camera**, **All** (sensors+mic), and
 **Permissions/Hardware** (any combination).
 
 Combine capabilities in one gesture:
@@ -139,7 +141,8 @@ enablePermissionsTap(['sensors', 'mic', 'vibration'], 'Tap to enable everything'
 
 Accepted tokens (and their aliases): `sensors` (motion/gyro/orientation/accelerometer),
 `mic`, `sound`, `speech`, `vibration`, `torch` (flashlight), `nfc`, `geo` (gps/location),
-`camera`. `enableHardware*` are aliases of `enablePermissions*`.
+`camera`, `share` (room/rooms: joins the room set up by `shareSetup()`, without waiting for it).
+`enableHardware*` are aliases of `enablePermissions*`.
 
 An optional `userSetupComplete()` callback runs once after any permission succeeds, and a
 `permissionsReady` `CustomEvent` fires on `window` with every flag in its `detail`.
@@ -154,7 +157,7 @@ if (window.sensorsEnabled) { /* motion is live */ }
 
 Flags: `sensorsEnabled`, `micEnabled`, `soundEnabled`, `speechEnabled`, `vibrationEnabled`,
 `torchEnabled`/`torchActive`, `nfcEnabled`, `geoEnabled`, `cameraEnabled`, `bleConnected`,
-`gesturesLocked`.
+`shareConnected`, `screenAwake`, `gesturesLocked`.
 
 ## Motion data
 
@@ -388,6 +391,121 @@ const v = await bleRead('sensor');
 Types: `bool, int8, uint8, int16, uint16, int32, uint32, float, double, string, bytes`.
 UUIDs auto-derive from the service (default `19b10000-e8f2-537e-4f6c-d104768a1214`).
 
+## Share (many phones, one room)
+
+Sync plain JSON values across phones in the same room: one 3D scene that every phone
+changes, multiplayer pieces, a projector page that adds up a class's phones. It is
+p5-phone's Share with the same names, the same wire protocol and the same server, so a
+three.js page and a p5.js page can be in one room together.
+
+**The server** is p5-phone's small
+[P5PhoneShare](https://github.com/npuckett/p5-phone/tree/main/companion/P5PhoneShare)
+Cloudflare worker (free tier). three-phone has no worker of its own. Deploy it once for your
+project:
+
+```bash
+cd p5-phone/companion/P5PhoneShare
+npm install
+npx wrangler login    # free Cloudflare account
+npx wrangler deploy   # prints https://….workers.dev
+```
+
+```js
+function init() {
+  // ...renderer, scene, camera...
+  shareSetup({
+    host: 'https://YOUR.workers.dev',   // or ?shareHost= in the page address
+    room: 'demo',                       // or ?room=
+    shared: { hue: 0.75 },              // the room's starting state
+    me: { x: 0, z: 0 }                  // this phone's own values
+  });
+  enableShareTap('Tap to join');        // or enablePermissionsTap(['gyro', 'share'], 'Tap to join')
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (shareConnected) {
+    crystal.material.color.setHSL(shared.hue, 0.7, 0.6);
+    for (const g of guests) placePiece(g.id, g.x, g.z); // the other phones' me
+  }
+  renderer.render(scene, camera);
+}
+
+function touchStarted() {
+  shared.hue = Math.random();           // everyone's crystal changes
+  me.x = 1; me.z = -2;                  // everyone sees your piece move
+}
+```
+
+**Commands:**
+- `shareSetup({ host, room, app, shared, me, keep, quiet, autoReconnect, sendInterval, disconnectWhenHidden, keepScreenOn })` returns `true` or `false` (with a console message)
+  - `keep` (default off): keep the room's `shared` after the last phone leaves. `true` (7 days), a number of ms, `'30m'`, `'24h'`, `'7d'`, or `{ expire: '24h' }`. At most 30 days, at least 1 second
+  - `quiet` (default `false`): do not send this phone the other phones' `me` changes, for a page that reads only `shared`. `guests` then says who is here and their role, not their live values
+  - `sendInterval` (ms, default `50`): changes are batched and sent at most this often; `0` sends each change at once
+  - `disconnectWhenHidden` (default `true` on phones): leave the room while the page is hidden (screen locked, another app) and rejoin when it is visible, keeping `me`
+  - `keepScreenOn` (default `true`): joining asks for a screen wake lock (see [Keep the screen on](#keep-the-screen-on)); `false` leaves the screen alone
+  - `?room=`, `?shareHost=` and `?app=` in the page address win over the config, and the console says so
+- `enableShareTap(label | options?)`, `enableShareButton(...)`, `enableShareCanvas(...)`, `enableShareBanner(...)`, `enableShareOn(selector)`: join from a gesture. Like every `enable*` helper, they run `userSetupComplete()`
+- `'share'` in `enablePermissionsTap([...])` (and the other `enablePermissions*` styles): join from the same tap as the other permissions
+- `shareConnect()` / `shareDisconnect()`: join and leave from your own code
+- `shareSet(path, value)` / `shareSetMe(path, value)`: write by dotted path (`'pos.x'`)
+- `shareEmit(name, data?)`: a one-shot room event, not stored. Others get `shareEvent(name, data, from)`
+- `shareClear()`: put `shared` back to the value given to `shareSetup()` (or `{}`) for every phone, and erase the kept copy
+- `shareGuest(id)`: that guest's `me`, your own `me` for your own id, or `null`
+- `guestsWith(field, value?)`: the guests that have `field`, or have it set to `value` (`guestsWith('role', 'phone')`)
+- `shareStatusText()`: one sentence about the connection for a DOM label ("Tap to join room demo.", "In room demo · 2 others here", "Cannot reach the room. Trying again. (…)")
+- `getShareJoinUrl()`: this page's address with `shareHost` / `room` / `app` filled in, to send to others or put in your own QR code
+- `isShareSupported()`: WebSocket check
+
+**Live objects:**
+- `shared`: the room's object. Assign like a plain object (`shared.score = 1`, `shared.list.push(x)`)
+- `me`: this phone's own object
+- `guests`: the other phones' `me` objects, each with its `id` (it shows in `console.log` and `JSON.stringify`). Empty while you are out of the room
+- `shareConnected`, `shareStatus` (`idle | connecting | connected | error | unsupported`), `shareError`, `shareRoom`, `shareClientId`, `shareIsHost`, `shareSupported`
+- `shareKept` / `shareKeptUntil`: the server keeps this room, and when the kept copy goes if nothing changes (ms, like `Date.now()`)
+- `shareQuiet`: the server agreed not to send this phone the other phones' `me` changes
+
+**Optional callbacks** (global functions, like `bleReceive`):
+
+```js
+function shareReady() {}                    // in the room, shared / me / guests filled in
+function shareReceive(path, value) {}       // another phone changed shared or a me
+function shareEvent(name, data, from) {}    // shareEmit from another phone; from is its id
+function shareJoined(id, data) {}           // a phone joined after you; data is its me
+function shareLeft(id, data) {}             // a phone left; data is its last me
+function shareHostChanged(isHost) {}
+function shareClosed() {}
+```
+
+**Things to know:**
+- Writing `me.x = ...` every frame is fine: unchanged values are not sent, and changes are batched every 50 ms.
+- Last write wins. Two phones doing `shared.score += 1` at the same moment count once. For counts, keep a tally in each phone's `me` and add up `guests`, or let the host (`shareIsHost`) own the value and have the others `shareEmit()` to it.
+- Values must be JSON: no `THREE.Vector3`, no functions, no `NaN`. Send `{ x, y, z }` numbers and rebuild the vector.
+- `shared` changes made while out of the room are replaced by the room's state when you rejoin; `me` is kept.
+- Keep, quiet, and the wire format are documented in p5-phone's
+  [P5PhoneShare README](https://github.com/npuckett/p5-phone/tree/main/companion/P5PhoneShare) and
+  [PROTOCOL.md](https://github.com/npuckett/p5-phone/blob/main/companion/P5PhoneShare/PROTOCOL.md).
+
+Example: [Shared Scene](examples/Phone%20Sensor%20Examples/share/01_shared_scene/) (pieces on one floor, a shared crystal, shake to pulse).
+
+## Keep the screen on
+
+A sketch driven by motion, sound or a Share room goes dark after 30 seconds or so, because
+only touches reset the phone's auto-lock timer. `keepScreenOn()` holds a screen wake lock
+while the page is showing, and asks for it again when the page comes back (the browser
+drops it whenever the page is hidden).
+
+```js
+function touchEnded() { keepScreenOn(); }   // iPhone: ask from a tap
+keepScreenOn(false);                        // let the screen sleep again
+if (window.screenAwake) { /* the lock is held */ }
+```
+
+- It returns a `Promise<boolean>`: `true` if the screen is being kept on. A browser without the API, a refusal (low battery) or an iframe without `allow="screen-wake-lock"` resolves `false`.
+- Joining a Share room calls it for you (`shareSetup({ keepScreenOn: false })` turns that off). With `'share'` in `enablePermissionsTap`, it is asked for inside the tap.
+- HTTPS (or `localhost`) only. Chrome and Edge, Safari 16.4+ on iOS, Firefox 126+.
+
 ## Vibration
 
 Android only (iOS Safari has no Vibration API).
@@ -440,6 +558,8 @@ unlockGestures();
 | Vibration | ❌ | ✅ | ⚠️ |
 | Torch | ❌ | ✅ | ❌ |
 | BLE | Bluefy only | ✅ HTTPS | Chrome/Edge HTTPS |
+| Share | ✅ | ✅ | ✅ |
+| Keep screen on | ✅ 16.4+ | ✅ | ✅ |
 
 Sensors, camera, NFC, GPS, and BLE need a **secure context** (HTTPS or `localhost`).
 
@@ -454,8 +574,11 @@ Sensors, camera, NFC, GPS, and BLE need a **secure context** (HTTPS or `localhos
   `getMicLevel()` instead of `p5.AudioIn.getLevel()`.
 - **Camera** renders through `getTexture()` / `createBackgroundMesh()` instead of p5's
   `image()`.
-- Everything else — the permission matrix, status flags, NFC, GPS, BLE, vibration, torch,
-  and the debug console — matches p5-phone's API names.
+- **Share** uses p5-phone's P5PhoneShare worker; three-phone has no server of its own. There
+  is no `showDesktopQr()` and no `Minimal` permission style in three-phone, so there is no
+  `enableShareMinimal()`; use `getShareJoinUrl()` for a join link.
+- Everything else — the permission matrix, status flags, NFC, GPS, BLE, Share, the wake lock,
+  vibration, torch, and the debug console — matches p5-phone's API names.
 
 ## License
 

@@ -1,6 +1,6 @@
 ---
 name: three-phone
-description: Mobile hardware access (motion, touch, mic, camera, NFC, GPS, BLE, vibration, torch) for three.js sketches. Use when a user builds a phone-sensor-driven three.js scene.
+description: Mobile hardware access (motion, touch, mic, camera, NFC, GPS, BLE, vibration, torch) and multi-phone Share rooms for three.js sketches. Use when a user builds a phone-sensor-driven or many-phones-one-scene three.js scene.
 version: 0.2.0
 ---
 
@@ -55,14 +55,15 @@ and `animate()` (per frame, `requestAnimationFrame`). These map to p5's `setup()
 ## Permission matrix
 
 `enable<Feature><Tap|Button|Canvas|Banner|On>` for **Gyro/Sensor, Mic, Sound, Speech,
-Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware**.
+Vibration, Torch (Flashlight), Nfc, Geo, Ble, Share, Camera, All, Permissions/Hardware**.
 
 - `enableGyroTap(message)`, `enableGyroButton(text, statusText)`,
   `enableGyroCanvas(message)`, `enableGyroBanner(message, 'top'|'bottom')`,
   `enableGyroOn('#selector')`.
 - Combine: `enablePermissionsTap(['sensors','mic','vibration'], msg)`. Tokens: `sensors, mic,
-  sound, speech, vibration, torch, nfc, geo, camera` (plus aliases). BLE takes an options
-  object: `enableBleTap({ label, statusText, position })`.
+  sound, speech, vibration, torch, nfc, geo, camera, share` (plus aliases). BLE takes an options
+  object: `enableBleTap({ label, statusText, position })`; Share takes a label string or the
+  same options object: `enableShareTap('Tap to join')`.
 - **AR (magic window)** → all five styles: `enableARTap/Button/Canvas/Banner/On` — sugar for
   `enablePermissions<Style>(['camera','sensors'])`. Combo token `'ar'`/`'magicwindow'` also
   works. Status: `window.arEnabled` (camera **and** sensors granted); `ar` field on the
@@ -117,6 +118,21 @@ route to global `touchStarted()`. `isXRSupported()` → `Promise<boolean>`; `end
 `enableBleTap()`, `bleReceive(name, value)`, `bleWrite(name, value)`, `bleRead(name)`,
 `window.bleValues`. Types: bool/int8/uint8/int16/uint16/int32/uint32/float/double/string/bytes.
 
+**Share** (any browser; many phones, one room) → `shareSetup({ host, room, shared?, me?, keep?,
+quiet? })` in `init()`, then `enableShareTap('Tap to join')` or `'share'` in
+`enablePermissionsTap(['gyro','share'])`. Read and write the proxies `shared` (the room's) and
+`me` (this phone's); read `guests` (other phones' `me`, each with `.id`). `shareEmit(name, data)`
+→ others' `shareEvent(name, data, from)`. Callbacks `shareReady`, `shareReceive(path, value)`,
+`shareJoined(id, data)`, `shareLeft(id, data)`, `shareHostChanged(isHost)`, `shareClosed`.
+Helpers `shareGuest(id)`, `guestsWith(field, value?)`, `shareStatusText()`, `getShareJoinUrl()`,
+`shareSet/shareSetMe(path, value)`, `shareClear()`. Flags `shareConnected`, `shareIsHost`,
+`shareStatus`, `shareKept`/`shareKeptUntil`, `shareQuiet`. `?shareHost=&room=` in the URL win.
+The server is p5-phone's `companion/P5PhoneShare` worker (`npx wrangler deploy`).
+
+**Keep the screen on** → `keepScreenOn()` (from a tap on iPhone) → `Promise<boolean>`,
+`keepScreenOn(false)`, `window.screenAwake`. Joining a Share room asks for it automatically
+(`shareSetup({ keepScreenOn: false })` to opt out).
+
 **Vibration** (Android) → `enableVibrationTap()`, `vibrate(ms | [on,off,...])`.
 
 **Torch** (Android Chrome) → `enableTorchTap()`, `torchOn/torchOff/toggleTorch/setTorch`,
@@ -144,5 +160,9 @@ route to global `touchStarted()`. `isXRSupported()` → `Promise<boolean>`; `end
   Use magic-window AR (`enableAR*`) there instead.
 - Calling `cam.attachBackground(scene)` before `cam.onReady(...)` — the video isn't live yet,
   so it no-ops. Always call it inside the `onReady` callback.
+- Putting a `THREE.Vector3`, `Color` or any class instance in `shared`/`me` — Share values must
+  be plain JSON. Write `me.x = v.x; me.z = v.z` and rebuild the vector when reading `guests`.
+- Counting with `shared.n += 1` from many phones — two phones at once count once (last write
+  wins). Let the host (`shareIsHost`) own the count and have the others `shareEmit()` to it.
 - Forgetting `cam.updateBackground()` in the resize handler — the magic-window background stops
   cover-fitting the canvas.

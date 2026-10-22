@@ -116,6 +116,20 @@ window.bleStatus = 'idle';
 window.bleError = '';
 window.bleDeviceName = '';
 window.bleValues = {};
+window.shareSupported = false;
+window.shareConnected = false;
+window.shareStatus = 'idle'; // idle | connecting | connected | error | unsupported
+window.shareError = '';
+window.shareRoom = '';
+window.shareClientId = '';
+window.shareIsHost = false;
+window.shareKept = false; // true when the server confirmed it keeps this room (the keep option)
+window.shareKeptUntil = 0; // ms timestamp when the kept copy is deleted if nothing changes, or 0
+window.shareQuiet = false; // true when the server confirmed it will not send other phones' me changes (the quiet option)
+window.shared = {};
+window.me = {};
+window.guests = [];
+window.screenAwake = false; // true while keepScreenOn() (or joining a Share room) holds a wake lock
 window.geoEnabled = false;
 window.geoStatus = 'idle'; // idle | requesting-permission | active | permission-denied | unsupported | secure-context-required | error | stopped
 window.geoError = '';
@@ -176,6 +190,36 @@ const _BLE_VALID_TYPES = new Set([
   'bool', 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32',
   'float', 'double', 'string', 'bytes'
 ]);
+
+// Share (PartyServer multi-user) internals. Same protocol and worker as p5-phone's Share.
+// v2: 'batch' messages, and the worker echoes shared patches to their sender.
+const _SHARE_PROTOCOL_VERSION = 2;
+const _SHARE_RECONNECT_DELAYS = [1500, 3000, 6000, 12000];
+// Changes are batched and sent at most this often (ms). A drag that writes me.x and
+// me.y every frame is then ~20 messages/s per phone instead of ~120, which keeps a
+// class inside the Cloudflare free tier (2M incoming WebSocket messages/day).
+const _SHARE_DEFAULT_SEND_INTERVAL = 50;
+let _shareProfile = null;
+let _shareSocket = null;
+let _shareReconnectTimer = null;
+let _shareReconnectAttempt = 0;
+let _shareReconnectStopped = false;
+let _shareApplyingRemote = false;
+let _shareSharedRoot = {};
+let _shareMeRoot = {};
+let _shareGuestsById = new Map();
+let _shareReadySent = false;
+let _shareOutbox = []; // queued {scope, path, value} ops, in order, not yet sent
+let _shareFlushTimer = null;
+let _sharePending = new Map(); // shared path -> my sent writes the worker has not echoed yet
+let _shareHiddenClosed = false; // socket closed because the page was hidden
+let _shareVisibilityBound = false;
+let _shareKeptSeen = false; // a welcome said this room is kept (cleared by shareSetup)
+
+// Screen wake lock (keepScreenOn(), and joining a Share room)
+let _wakeLockSentinel = null;
+let _wakeLockWanted = false;
+let _wakeLockBound = false;
 
 // The three.js renderer canvas three-phone binds gestures / canvas-touch to.
 let _phoneCanvas = null;
@@ -909,6 +953,65 @@ function enableBleBanner(options = {}) {
 function enableBleOn(selector) {
   _bindPermissionTo(selector, () => {
     _bleConnectFromUI('custom element');
+  });
+}
+
+// enableShare*('Tap to join') works like the other enable* helpers; an options object
+// ({ label, statusText, position, ... }) is also accepted.
+function _shareUiOptions(options) {
+  if (typeof options === 'string') return { label: options };
+  return options && typeof options === 'object' ? options : {};
+}
+
+function _shareConnectFromUI(source) {
+  if (!_shareProfile) {
+    debugWarn('Call shareSetup() before connecting.');
+    return;
+  }
+  shareConnect().then(() => {
+    console.log('✅ Share connect initiated via ' + source);
+  }).catch(() => {});
+  // Like every other enable* helper, the join tap runs userSetupComplete().
+  _notifySketchReady();
+}
+
+function enableShareButton(options = {}) {
+  options = _shareUiOptions(options);
+  const label = options.label || 'Join room';
+  const status = options.statusText || 'Connecting...';
+  _createPermissionButton(label, status, () => {
+    _shareConnectFromUI('button');
+  });
+}
+
+function enableShareTap(options = {}) {
+  options = _shareUiOptions(options);
+  const message = options.label || options.message || 'Tap to join shared room';
+  _createTapToEnable(message, () => {
+    _shareConnectFromUI('tap');
+  });
+}
+
+function enableShareCanvas(options = {}) {
+  options = _shareUiOptions(options);
+  const message = options.label || options.message || 'Touch to join room';
+  _createCanvasToEnable(message, () => {
+    _shareConnectFromUI('canvas');
+  });
+}
+
+function enableShareBanner(options = {}) {
+  options = _shareUiOptions(options);
+  const message = options.label || options.message || 'Tap to join shared room';
+  const position = options.position || 'top';
+  _createBannerToEnable(message, position, () => {
+    _shareConnectFromUI('banner');
+  });
+}
+
+function enableShareOn(selector) {
+  _bindPermissionTo(selector, () => {
+    _shareConnectFromUI('custom element');
   });
 }
 
@@ -2521,6 +2624,1171 @@ async function bleWrite(name, value, opts = {}) {
   }
 }
 
+// =========================================
+// SHARE (PartyServer multi-user shared state)
+// Ported from p5-phone 1.16.0: same API names, same wire protocol, same worker
+// (p5-phone/companion/P5PhoneShare). Call shareSetup() in init(); connect via
+// enableShare* or shareConnect() from a user gesture. Mutate shared / me like
+// plain objects; read guests in animate().
+// =========================================
+
+function _shareIsJsonSerializable(value, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > 32) return false;
+  if (value === null) return true;
+  const t = typeof value;
+  if (t === 'string' || t === 'boolean') return true;
+  if (t === 'number') return Number.isFinite(value);
+  if (t === 'undefined' || t === 'function' || t === 'symbol' || t === 'bigint') return false;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (!_shareIsJsonSerializable(value[i], depth + 1)) return false;
+    }
+    return true;
+  }
+  if (t === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return false;
+    }
+    const keys = Object.keys(value);
+    for (let i = 0; i < keys.length; i++) {
+      if (!_shareIsJsonSerializable(value[keys[i]], depth + 1)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function _shareCloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function _shareParsePath(path) {
+  if (typeof path !== 'string' || path.length === 0) return [];
+  return path.split('.').filter(function(p) { return p.length > 0; });
+}
+
+// Path segments that would walk into Object.prototype. A patch from another phone
+// with one of these must never be applied.
+const _SHARE_BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function _shareIsSafePath(path) {
+  const parts = _shareParsePath(path);
+  if (parts.length === 0) return false;
+  for (let i = 0; i < parts.length; i++) {
+    if (_SHARE_BLOCKED_KEYS.has(parts[i])) return false;
+  }
+  return true;
+}
+
+function _shareGetAtPath(obj, path) {
+  const parts = _shareParsePath(path);
+  let cur = obj;
+  for (let i = 0; i < parts.length; i++) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = cur[parts[i]];
+  }
+  return cur;
+}
+
+function _shareApplyPatchInPlace(obj, path, value) {
+  if (!_shareIsSafePath(path)) return false;
+  const parts = _shareParsePath(path);
+
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    const next = cur[part];
+    // Arrays are walked into, so 'list.2' sets an element (array writes send index paths).
+    if (next === null || typeof next !== 'object') {
+      const created = {};
+      cur[part] = created;
+      cur = created;
+    } else {
+      cur = next;
+    }
+  }
+
+  const leaf = parts[parts.length - 1];
+  if (value === undefined) {
+    delete cur[leaf];
+  } else {
+    cur[leaf] = value;
+  }
+  return true;
+}
+
+function _shareRoomKey(app, room) {
+  const a = (app && String(app).trim()) || 'default';
+  const r = (room && String(room).trim()) || 'main';
+  return a + ':' + r;
+}
+
+// The keep option: a room that holds on to `shared` after the last phone leaves.
+const _SHARE_KEEP_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
+const _SHARE_KEEP_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+const _SHARE_KEEP_MIN_MS = 1000;
+
+// The quiet option: true asks the server not to send this phone the other phones' `me`
+// changes. guests then holds who is here and what each had when this phone joined (and at
+// each later join and leave), not their live values.
+function _shareParseQuiet(value) {
+  if (value === undefined || value === null || value === false) return { quiet: false };
+  if (value === true) return { quiet: true };
+  return { quiet: false, error: 'shareSetup(): quiet must be true or false.' };
+}
+
+// A time as milliseconds: a number of ms, or a string like '30m', '24h', '7d', '90s', '500ms'.
+// Returns NaN for anything else (including a string with no unit).
+function _shareParseDuration(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : NaN;
+  if (typeof value !== 'string') return NaN;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)\s*$/i.exec(value);
+  if (!m) return NaN;
+  const unit = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 }[m[2].toLowerCase()];
+  const ms = parseFloat(m[1]) * unit;
+  return ms > 0 ? ms : NaN;
+}
+
+// keep: true | ms | '24h' | { expire: ms | '24h' }  ->  { expire, note? } | { error } | null (no keep).
+// A time under 1 second or over 30 days is moved to the limit, with a note.
+function _shareParseKeep(keep) {
+  if (keep === undefined || keep === null || keep === false) return null;
+  let expire = _SHARE_KEEP_DEFAULT_MS;
+  if (keep === true) {
+    // the default
+  } else if (typeof keep === 'object' && !Array.isArray(keep)) {
+    if (keep.expire !== undefined) expire = _shareParseDuration(keep.expire);
+  } else {
+    expire = _shareParseDuration(keep);
+  }
+  if (!(expire > 0)) {
+    return {
+      error: 'shareSetup(): keep must be true, a number of milliseconds, a string like \'24h\' (s, m, h, d) ' +
+        'or { expire: \'24h\' }.'
+    };
+  }
+  expire = Math.round(expire);
+  if (expire > _SHARE_KEEP_MAX_MS) {
+    return { expire: _SHARE_KEEP_MAX_MS, note: 'shareSetup(): keep is at most 30 days. Using 30 days.' };
+  }
+  if (expire < _SHARE_KEEP_MIN_MS) {
+    return { expire: _SHARE_KEEP_MIN_MS, note: 'shareSetup(): keep is at least 1 second. Using 1 second.' };
+  }
+  return { expire: expire };
+}
+
+/**
+ * Read Share join params from the page URL.
+ * Accepts: shareHost (or host), shareRoom (or room), shareApp (or app).
+ * URL values are intended for workshop link sharing.
+ */
+function _shareReadUrlParams(search) {
+  const out = {};
+  if (typeof search !== 'string') {
+    if (typeof window === 'undefined' || !window.location) return out;
+    search = window.location.search || '';
+  }
+  let params;
+  try {
+    params = new URLSearchParams(search.charAt(0) === '?' ? search.slice(1) : search);
+  } catch (e) {
+    return out;
+  }
+  const host = params.get('shareHost') || params.get('host');
+  const room = params.get('shareRoom') || params.get('room');
+  const app = params.get('shareApp') || params.get('app');
+  if (host) out.host = String(host).trim();
+  if (room) out.room = String(room).trim();
+  if (app) out.app = String(app).trim();
+  return out;
+}
+
+/**
+ * Build a sketch URL that carries Share join params so phones need no code edits.
+ * @param {string} [baseUrl]
+ * @param {{host?: string, room?: string, app?: string}} [profile]
+ * @returns {string}
+ */
+function _shareBuildJoinUrl(baseUrl, profile) {
+  const base = baseUrl || (typeof window !== 'undefined' && window.location ? window.location.href : '');
+  if (!base) return '';
+  let url;
+  try {
+    url = new URL(base, typeof window !== 'undefined' ? window.location.href : undefined);
+  } catch (e) {
+    return base;
+  }
+  const host = profile && profile.host;
+  const room = profile && profile.room;
+  const app = profile && profile.app;
+  if (host) {
+    url.searchParams.set('shareHost', String(host).replace(/\/$/, ''));
+  }
+  if (room) {
+    url.searchParams.set('room', String(room));
+  }
+  if (app && app !== 'default') {
+    url.searchParams.set('app', String(app));
+  } else {
+    url.searchParams.delete('app');
+    url.searchParams.delete('shareApp');
+  }
+  // Prefer canonical names; drop aliases that could confuse scanners.
+  url.searchParams.delete('host');
+  url.searchParams.delete('shareRoom');
+  url.searchParams.delete('shareApp');
+  return url.toString();
+}
+
+/**
+ * Return the current page URL with shareHost / room / app query params from
+ * the active shareSetup() profile (or from an explicit profile object).
+ */
+function getShareJoinUrl(baseUrl, profile) {
+  const p = profile || _shareProfile;
+  if (!p || !p.host) {
+    return baseUrl || (typeof window !== 'undefined' && window.location ? window.location.href : '');
+  }
+  return _shareBuildJoinUrl(baseUrl, p);
+}
+
+function _shareRebuildGuestsArray() {
+  const list = [];
+  _shareGuestsById.forEach(function(data, id) {
+    if (id === window.shareClientId) return;
+    const entry = data && typeof data === 'object' ? data : {};
+    // Expose id for sketches without requiring a nested {id,data} shape.
+    if (entry.id !== id) {
+      try {
+        // Enumerable, so console.log(guests) and JSON.stringify(guests) show who is who.
+        Object.defineProperty(entry, 'id', {
+          value: id,
+          enumerable: true,
+          configurable: true,
+          writable: false
+        });
+      } catch (e) {
+        entry.id = id;
+      }
+    }
+    list.push(entry);
+  });
+  window.guests = list;
+}
+
+// Objects and arrays are both wrapped, so shared.list.push(3) and shared.list[0] = 9
+// sync like shared.score = 1 does (arrays send index paths plus length).
+function _shareCreateProxy(target, scope, pathPrefix) {
+  return new Proxy(target, {
+    get: function(obj, prop) {
+      if (prop === '__shareRaw') return obj;
+      const val = Reflect.get(obj, prop);
+      if (
+        val !== null &&
+        typeof val === 'object' &&
+        typeof prop === 'string' &&
+        Object.prototype.hasOwnProperty.call(obj, prop)
+      ) {
+        const nextPath = pathPrefix ? pathPrefix + '.' + prop : prop;
+        return _shareCreateProxy(val, scope, nextPath);
+      }
+      return val;
+    },
+    set: function(obj, prop, value) {
+      if (typeof prop === 'symbol') {
+        obj[prop] = value;
+        return true;
+      }
+      if (_SHARE_BLOCKED_KEYS.has(prop)) {
+        debugError('share: "' + prop + '" cannot be used as a key');
+        return false;
+      }
+      if (!_shareApplyingRemote && value !== undefined && !_shareIsJsonSerializable(value)) {
+        debugError('share: value for "' + prop + '" must be JSON-serializable');
+        return false;
+      }
+      const isObject = value !== null && typeof value === 'object';
+      // me.x = mouseX every frame should cost nothing while the value is unchanged.
+      if (!isObject && Object.prototype.hasOwnProperty.call(obj, prop) && Object.is(obj[prop], value)) {
+        return true;
+      }
+      const path = pathPrefix ? pathPrefix + '.' + prop : String(prop);
+      // Store a copy: later edits to the sketch's own object (or another shared proxy)
+      // must not change shared state without syncing.
+      const stored = isObject ? _shareCloneJson(value) : value;
+      const ok = Reflect.set(obj, prop, stored);
+      if (ok && !_shareApplyingRemote) {
+        _shareQueuePatch(scope, path, stored);
+      }
+      return ok;
+    },
+    deleteProperty: function(obj, prop) {
+      if (typeof prop === 'symbol') {
+        return Reflect.deleteProperty(obj, prop);
+      }
+      if (!Object.prototype.hasOwnProperty.call(obj, prop)) return true;
+      const path = pathPrefix ? pathPrefix + '.' + prop : String(prop);
+      const ok = Reflect.deleteProperty(obj, prop);
+      if (ok && !_shareApplyingRemote) {
+        _shareQueuePatch(scope, path, undefined);
+      }
+      return ok;
+    }
+  });
+}
+
+function _shareBindProxies() {
+  window.shared = _shareCreateProxy(_shareSharedRoot, 'shared', '');
+  window.me = _shareCreateProxy(_shareMeRoot, 'me', '');
+}
+
+function _shareResetLocalState(seedShared, seedMe) {
+  _shareSharedRoot = seedShared && typeof seedShared === 'object' && !Array.isArray(seedShared)
+    ? _shareCloneJson(seedShared)
+    : {};
+  _shareMeRoot = seedMe && typeof seedMe === 'object' && !Array.isArray(seedMe)
+    ? _shareCloneJson(seedMe)
+    : {};
+  _shareGuestsById = new Map();
+  window.guests = [];
+  _shareBindProxies();
+}
+
+// disconnectWhenHidden defaults to on for phones. p5-phone reads its window.isMobile;
+// three-phone uses that flag when a page defines it, otherwise a user-agent check.
+function _shareIsPhone() {
+  if (typeof window.isMobile === 'boolean') return window.isMobile;
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/android|iphone|ipad|ipod|mobile/i.test(ua)) return true;
+  // iPadOS 13+ reports a Mac user agent but has touch.
+  return /mac/i.test(ua) && navigator.maxTouchPoints > 1;
+}
+
+function isShareSupported() {
+  if (typeof WebSocket === 'undefined') {
+    window.shareSupported = false;
+    window.shareStatus = 'unsupported';
+    window.shareError = 'WebSocket is not available in this environment.';
+    return false;
+  }
+  window.shareSupported = true;
+  if (window.shareStatus === 'unsupported') {
+    window.shareStatus = 'idle';
+    window.shareError = '';
+  }
+  return true;
+}
+
+function shareSetup(config) {
+  config = config && typeof config === 'object' ? config : {};
+  const fromUrl = _shareReadUrlParams();
+
+  // URL params win so a shared / QR link configures every phone without edits.
+  const host = (fromUrl.host || config.host || '').trim();
+  const room = (fromUrl.room || config.room || '').trim();
+  if (fromUrl.room && config.room && fromUrl.room !== config.room) {
+    console.info('three-phone Share: the address has ?room=' + fromUrl.room + ', so it is used instead of ' +
+      "room: '" + config.room + "' in shareSetup().");
+  }
+  if (fromUrl.host && config.host && fromUrl.host.replace(/\/$/, '') !== String(config.host).replace(/\/$/, '')) {
+    console.info('three-phone Share: the address has ?shareHost=' + fromUrl.host + ', so it is used instead of ' +
+      'the host in shareSetup().');
+  }
+  const app = (fromUrl.app || config.app || 'default').trim() || 'default';
+
+  if (!host) {
+    debugError(
+      'shareSetup() needs a host: pass host in config, or open a link with ?shareHost=https://….workers.dev'
+    );
+    return false;
+  }
+  if (!room) {
+    debugError(
+      'shareSetup() needs a room: pass room in config, or open a link with ?room=demo'
+    );
+    return false;
+  }
+
+  isShareSupported();
+
+  const sharedInit =
+    config.shared && typeof config.shared === 'object' && !Array.isArray(config.shared)
+      ? config.shared
+      : {};
+  const meInit =
+    config.me && typeof config.me === 'object' && !Array.isArray(config.me)
+      ? config.me
+      : {};
+
+  if (!_shareIsJsonSerializable(sharedInit) || !_shareIsJsonSerializable(meInit)) {
+    debugError('shareSetup(): shared and me must be JSON-serializable plain objects.');
+    return false;
+  }
+
+  const keepOption = _shareParseKeep(config.keep);
+  if (keepOption && keepOption.error) {
+    debugError(keepOption.error);
+    return false;
+  }
+  if (keepOption && keepOption.note) debugWarn(keepOption.note);
+
+  const quietOption = _shareParseQuiet(config.quiet);
+  if (quietOption.error) {
+    debugError(quietOption.error);
+    return false;
+  }
+
+  _shareProfile = {
+    host: String(host).replace(/\/$/, ''),
+    room: String(room),
+    app: String(app),
+    shared: _shareCloneJson(sharedInit),
+    me: _shareCloneJson(meInit),
+    // Ask the server to keep this room's `shared` after the last phone leaves. Only the
+    // first phone to create the room sets this; the welcome says what the room does.
+    keep: keepOption ? { expire: keepOption.expire } : null,
+    // Ask the server not to send other phones' `me` changes. Every phone chooses for itself.
+    quiet: quietOption.quiet,
+    autoReconnect: config.autoReconnect !== false,
+    sendInterval: Number.isFinite(config.sendInterval) && config.sendInterval >= 0
+      ? config.sendInterval
+      : _SHARE_DEFAULT_SEND_INTERVAL,
+    // A locked or backgrounded phone leaves the room right away instead of lingering
+    // in everyone's guests (and possibly as host) until its socket times out.
+    disconnectWhenHidden: config.disconnectWhenHidden !== undefined
+      ? !!config.disconnectWhenHidden
+      : _shareIsPhone(),
+    // A phone whose screen locks leaves the room, so joining asks for a wake lock.
+    keepScreenOn: config.keepScreenOn !== false
+  };
+  _shareBindVisibility();
+
+  window.shareRoom = _shareRoomKey(_shareProfile.app, _shareProfile.room);
+  _shareClearQueues();
+  _shareResetLocalState(_shareProfile.shared, _shareProfile.me);
+  window.shareStatus = 'idle';
+  window.shareError = '';
+  window.shareConnected = false;
+  window.shareClientId = '';
+  window.shareIsHost = false;
+  window.shareKept = false;
+  window.shareKeptUntil = 0;
+  window.shareQuiet = false;
+  _shareKeptSeen = false;
+  _shareReadySent = false;
+  debug(
+    'shareSetup room=' + window.shareRoom + ' host=' + _shareProfile.host +
+    (fromUrl.host || fromUrl.room ? ' (from URL)' : '')
+  );
+  return true;
+}
+
+function _shareWsUrl() {
+  const host = _shareProfile.host;
+  const key = encodeURIComponent(_shareRoomKey(_shareProfile.app, _shareProfile.room));
+  const wsBase = host.replace(/^http/i, 'ws');
+  return wsBase + '/parties/share-room/' + key;
+}
+
+function _shareSend(obj) {
+  if (!_shareSocket || _shareSocket.readyState !== WebSocket.OPEN) return false;
+  try {
+    _shareSocket.send(JSON.stringify(obj));
+    return true;
+  } catch (err) {
+    debugError('share send failed: ' + (err && err.message ? err.message : err));
+    return false;
+  }
+}
+
+// Queue a change and send it with the next batch. A queued op that this one overwrites
+// (same path, or a path inside it) is dropped; everything else keeps its order.
+function _shareQueuePatch(scope, path, value) {
+  if (!window.shareConnected) return;
+  if (!_shareIsSafePath(path)) {
+    debugError('share patch rejected: invalid path ' + path);
+    return;
+  }
+  if (value !== undefined && !_shareIsJsonSerializable(value)) {
+    debugError('share patch rejected: non-JSON value at ' + path);
+    return;
+  }
+  const inside = path + '.';
+  _shareOutbox = _shareOutbox.filter(function(op) {
+    return !(op.scope === scope && (op.path === path || op.path.indexOf(inside) === 0));
+  });
+  const op = { scope: scope, path: path };
+  if (value !== undefined) op.value = _shareCloneJson(value);
+  _shareOutbox.push(op);
+
+  const interval = _shareProfile ? _shareProfile.sendInterval : 0;
+  if (interval <= 0) {
+    _shareFlush();
+  } else if (!_shareFlushTimer) {
+    _shareFlushTimer = setTimeout(_shareFlush, interval);
+  }
+}
+
+function _shareFlush() {
+  if (_shareFlushTimer) {
+    clearTimeout(_shareFlushTimer);
+    _shareFlushTimer = null;
+  }
+  if (_shareOutbox.length === 0) return;
+  const ops = _shareOutbox;
+  _shareOutbox = [];
+  if (!window.shareConnected) return;
+  const msg = ops.length === 1
+    ? Object.assign({ type: 'patch', v: _SHARE_PROTOCOL_VERSION }, ops[0])
+    : { type: 'batch', v: _SHARE_PROTOCOL_VERSION, ops: ops };
+  if (!_shareSend(msg)) return;
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i].scope === 'shared') {
+      _sharePending.set(ops[i].path, (_sharePending.get(ops[i].path) || 0) + 1);
+    }
+  }
+}
+
+function _shareClearQueues() {
+  if (_shareFlushTimer) {
+    clearTimeout(_shareFlushTimer);
+    _shareFlushTimer = null;
+  }
+  _shareOutbox = [];
+  _sharePending = new Map();
+}
+
+// Shared paths with a local write the worker has not applied yet: queued or unechoed.
+function _shareUnconfirmedPaths() {
+  const paths = [];
+  _sharePending.forEach(function(count, p) { paths.push(p); });
+  for (let i = 0; i < _shareOutbox.length; i++) {
+    if (_shareOutbox[i].scope === 'shared') paths.push(_shareOutbox[i].path);
+  }
+  return paths;
+}
+
+function shareSet(path, value) {
+  if (typeof path !== 'string' || !_shareIsSafePath(path)) {
+    debugError('shareSet(path, value) requires a non-empty path string (no __proto__ / prototype / constructor).');
+    return false;
+  }
+  if (value !== undefined && !_shareIsJsonSerializable(value)) {
+    debugError('shareSet(): value must be JSON-serializable.');
+    return false;
+  }
+  _shareApplyingRemote = true;
+  try {
+    _shareApplyPatchInPlace(_shareSharedRoot, path, value === undefined ? undefined : _shareCloneJson(value));
+  } finally {
+    _shareApplyingRemote = false;
+  }
+  _shareQueuePatch('shared', path, value);
+  return true;
+}
+
+function shareSetMe(path, value) {
+  if (typeof path !== 'string' || !_shareIsSafePath(path)) {
+    debugError('shareSetMe(path, value) requires a non-empty path string (no __proto__ / prototype / constructor).');
+    return false;
+  }
+  if (value !== undefined && !_shareIsJsonSerializable(value)) {
+    debugError('shareSetMe(): value must be JSON-serializable.');
+    return false;
+  }
+  _shareApplyingRemote = true;
+  try {
+    _shareApplyPatchInPlace(_shareMeRoot, path, value === undefined ? undefined : _shareCloneJson(value));
+  } finally {
+    _shareApplyingRemote = false;
+  }
+  _shareQueuePatch('me', path, value);
+  return true;
+}
+
+function shareEmit(name, data) {
+  if (!window.shareConnected) {
+    debugWarn('shareEmit(): not connected.');
+    return false;
+  }
+  if (typeof name !== 'string' || name.length === 0) {
+    debugError('shareEmit(name, data?) requires a non-empty name.');
+    return false;
+  }
+  if (data !== undefined && !_shareIsJsonSerializable(data)) {
+    debugError('shareEmit(): data must be JSON-serializable.');
+    return false;
+  }
+  // Send queued changes first, so others see the state the event refers to.
+  _shareFlush();
+  const msg = {
+    type: 'emit',
+    v: _SHARE_PROTOCOL_VERSION,
+    name: name
+  };
+  if (data !== undefined) {
+    msg.data = _shareCloneJson(data);
+  }
+  return _shareSend(msg);
+}
+
+// ---- Share helpers -------------------------------------------------------------
+
+// Joining from a tap in enablePermissionsTap(['gyro', 'share']). It does not wait for
+// the room, so the other permissions and userSetupComplete() run straight away.
+function _requestShareJoinCore() {
+  if (!_shareProfile) {
+    debugError("'share' in the permission list needs shareSetup() first.");
+    return false;
+  }
+  shareConnect().catch(function() {});
+  return true;
+}
+
+/**
+ * The guest with this id, or `me` when the id is this phone's own.
+ * Use it with the third argument of shareEvent(name, data, from) to find who sent an event.
+ * @param {string} id
+ * @returns {object|null} that phone's me, or null if it is not in the room
+ */
+function shareGuest(id) {
+  if (!id) return null;
+  if (id === window.shareClientId) return window.me;
+  return _shareGuestsById.get(id) || null;
+}
+
+/**
+ * The guests that have a field, or that have it set to a value.
+ * guestsWith('value') skips phones that have not sent a value yet.
+ * guestsWith('role', 'phone') skips a projector page in the same room.
+ * @param {string} field
+ * @param {*} [value]
+ * @returns {object[]}
+ */
+function guestsWith(field, value) {
+  const list = Array.isArray(window.guests) ? window.guests : [];
+  if (arguments.length < 2) {
+    return list.filter(function(g) { return g && g[field] !== undefined && g[field] !== null; });
+  }
+  return list.filter(function(g) { return g && g[field] === value; });
+}
+
+/**
+ * One plain sentence about the room connection, to show on screen (a DOM label or a text sprite).
+ * @returns {string}
+ */
+function shareStatusText() {
+  if (window.shareStatus === 'unsupported' || window.shareSupported === false) {
+    return 'This browser cannot join a room.';
+  }
+  if (!_shareProfile) {
+    return 'No room yet. Call shareSetup({ host, room }) first.';
+  }
+  const room = _shareProfile.room;
+  if (window.shareConnected) {
+    const n = Array.isArray(window.guests) ? window.guests.length : 0;
+    return 'In room ' + room + ' · ' + (n === 0 ? 'nobody else here yet' : n === 1 ? '1 other here' : n + ' others here');
+  }
+  if (window.shareStatus === 'connecting') return 'Joining room ' + room + '…';
+  if (window.shareStatus === 'error') {
+    const why = window.shareError || 'Share WebSocket error';
+    if (/protocol/i.test(why)) return 'The server is a different version of Share. Redeploy it. (' + why + ')';
+    return _shareReconnectTimer
+      ? 'Cannot reach the room. Trying again. (' + why + ')'
+      : 'Cannot reach the room. (' + why + ')';
+  }
+  return 'Tap to join room ' + room + '.';
+}
+
+// ---- Keep the screen on ----------------------------------------------------------
+// A phone leaves its Share room when the screen locks. Share asks for a wake lock when
+// it joins; keepScreenOn() asks for one in any sketch. The lock is dropped by the
+// browser when the page is hidden, so it is asked for again when the page comes back.
+// (Its state is with the other internals at the top of the file.)
+
+/**
+ * Keep the screen on while the page is showing. Call it from a tap on iPhone.
+ * keepScreenOn(false) lets the screen sleep again.
+ * @param {boolean} [on=true]
+ * @returns {Promise<boolean>} true if the screen is being kept on
+ */
+function keepScreenOn(on) {
+  return _keepScreenOnCore(on !== false);
+}
+
+function _keepScreenOnCore(on) {
+  if (!on) {
+    _wakeLockWanted = false;
+    const sentinel = _wakeLockSentinel;
+    _wakeLockSentinel = null;
+    window.screenAwake = false;
+    if (sentinel && !sentinel.released) sentinel.release().catch(function() {});
+    return Promise.resolve(false);
+  }
+  _wakeLockWanted = true;
+  if (!_wakeLockBound && typeof document !== 'undefined') {
+    _wakeLockBound = true;
+    document.addEventListener('visibilitychange', function() {
+      if (_wakeLockWanted && document.visibilityState === 'visible') _requestWakeLock();
+    });
+  }
+  return _requestWakeLock();
+}
+
+function _requestWakeLock() {
+  if (typeof navigator === 'undefined' || !navigator.wakeLock ||
+      typeof navigator.wakeLock.request !== 'function') {
+    return Promise.resolve(false);
+  }
+  if (_wakeLockSentinel && !_wakeLockSentinel.released) return Promise.resolve(true);
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    return Promise.resolve(false);
+  }
+  let request;
+  try {
+    request = navigator.wakeLock.request('screen');
+  } catch (err) {
+    return Promise.resolve(false);
+  }
+  return Promise.resolve(request).then(function(sentinel) {
+    if (!_wakeLockWanted) {
+      sentinel.release().catch(function() {});
+      return false;
+    }
+    _wakeLockSentinel = sentinel;
+    window.screenAwake = true;
+    sentinel.addEventListener('release', function() {
+      if (_wakeLockSentinel === sentinel) {
+        _wakeLockSentinel = null;
+        window.screenAwake = false;
+      }
+    });
+    return true;
+  }).catch(function(err) {
+    debug('keepScreenOn: ' + (err && err.message ? err.message : err));
+    window.screenAwake = false;
+    return false;
+  });
+}
+
+// Put `shared` back to the value given to shareSetup() (or {}) for everyone in the room, and
+// erase the kept copy. Any phone in the room can call it. `me` and guests are not touched.
+function shareClear() {
+  if (!window.shareConnected) {
+    debugWarn('shareClear(): not connected.');
+    return false;
+  }
+  // Changes made just before the clear are sent first, so the clear removes them too.
+  _shareFlush();
+  return _shareSend({
+    type: 'clear',
+    v: _SHARE_PROTOCOL_VERSION,
+    shared: _shareCloneJson(_shareProfile.shared)
+  });
+}
+
+// The worker applies patches in one order and sends every shared patch to everyone,
+// the sender included. A phone keeps its own unconfirmed writes on screen and skips
+// remote writes that one of them will override on the worker, so all phones settle
+// on the worker's value even when two write the same key at once.
+function _shareApplySharedPatch(path, value, clientId) {
+  if (clientId && clientId === window.shareClientId && _sharePending.has(path)) {
+    // Echo of my own write: the worker has applied it. Local state already shows it.
+    // (An echo with no pending write comes after a reset or an error cleared the list:
+    // the room's value was not on screen, so it is applied below.)
+    const left = _sharePending.get(path) - 1;
+    if (left > 0) _sharePending.set(path, left);
+    else _sharePending.delete(path);
+    return false;
+  }
+  const unconfirmed = _shareUnconfirmedPaths();
+  const inside = [];
+  for (let i = 0; i < unconfirmed.length; i++) {
+    const p = unconfirmed[i];
+    // My write to this path, or to an object containing it, reaches the worker later.
+    if (p === path || path.indexOf(p + '.') === 0) return false;
+    if (p.indexOf(path + '.') === 0) inside.push(p);
+  }
+  // A remote write replaces an object I have unconfirmed writes inside: apply it, then
+  // put my writes back on top, as the worker will.
+  const keep = inside.map(function(p) {
+    const v = _shareGetAtPath(_shareSharedRoot, p);
+    return [p, v === undefined ? undefined : _shareCloneJson(v)];
+  });
+  _shareApplyPatchInPlace(_shareSharedRoot, path, value);
+  for (let i = 0; i < keep.length; i++) {
+    _shareApplyPatchInPlace(_shareSharedRoot, keep[i][0], keep[i][1]);
+  }
+  return true;
+}
+
+function _shareApplyRemotePatch(msg, fromId) {
+  const scope = msg.scope;
+  const path = msg.path;
+  const value = Object.prototype.hasOwnProperty.call(msg, 'value') ? msg.value : undefined;
+  const clientId = fromId || msg.clientId;
+  if (!_shareIsSafePath(path)) return;
+
+  _shareApplyingRemote = true;
+  try {
+    if (scope === 'shared') {
+      if (_shareApplySharedPatch(path, value, clientId) && typeof shareReceive === 'function') {
+        shareReceive(path, value);
+      }
+    } else if (scope === 'me') {
+      if (clientId && clientId === window.shareClientId) {
+        _shareApplyPatchInPlace(_shareMeRoot, path, value);
+      } else if (clientId) {
+        let guest = _shareGuestsById.get(clientId);
+        if (!guest) {
+          guest = {};
+          _shareGuestsById.set(clientId, guest);
+        }
+        _shareApplyPatchInPlace(guest, path, value);
+        _shareRebuildGuestsArray();
+      }
+      if (typeof shareReceive === 'function') {
+        shareReceive(path, value);
+      }
+    }
+  } finally {
+    _shareApplyingRemote = false;
+  }
+}
+
+// The server's keep status (welcome.keep or a 'kept' message): { expire, remaining } in ms.
+// Without it (an older server, or a room that is not kept) shareKept is false.
+function _shareSetKept(keep) {
+  const remaining = keep && Number.isFinite(keep.remaining) ? Math.max(0, keep.remaining) : null;
+  if (keep && typeof keep === 'object' && remaining !== null) {
+    window.shareKept = true;
+    _shareKeptSeen = true;
+    // The server sends time left, not a clock time, so a phone's clock being off does not matter.
+    window.shareKeptUntil = Date.now() + remaining;
+  } else {
+    window.shareKept = false;
+    window.shareKeptUntil = 0;
+  }
+}
+
+// The room's `shared` was replaced as a whole: shareClear(), or the server refused a write
+// and sends its real state back. Writes of mine the server has not applied yet come after
+// this on the server, so they stay on screen on top of it.
+function _shareApplyReset(sharedValue) {
+  const unconfirmed = _shareUnconfirmedPaths();
+  const keep = unconfirmed.map(function(p) {
+    const v = _shareGetAtPath(_shareSharedRoot, p);
+    return [p, v === undefined ? undefined : _shareCloneJson(v)];
+  });
+  _shareApplyingRemote = true;
+  try {
+    _shareSharedRoot = sharedValue && typeof sharedValue === 'object' && !Array.isArray(sharedValue)
+      ? _shareCloneJson(sharedValue)
+      : {};
+    for (let i = 0; i < keep.length; i++) {
+      _shareApplyPatchInPlace(_shareSharedRoot, keep[i][0], keep[i][1]);
+    }
+    _shareBindProxies();
+  } finally {
+    _shareApplyingRemote = false;
+  }
+}
+
+function _shareHandleMessage(raw) {
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch (e) {
+    debugWarn('share: ignoring non-JSON message');
+    return;
+  }
+  if (!msg || typeof msg.type !== 'string') return;
+
+  switch (msg.type) {
+    case 'welcome': {
+      window.shareClientId = msg.clientId || '';
+      window.shareIsHost = !!msg.isHost;
+      _shareClearQueues();
+      _shareApplyingRemote = true;
+      try {
+        _shareSharedRoot = msg.shared && typeof msg.shared === 'object' ? _shareCloneJson(msg.shared) : {};
+        _shareMeRoot = msg.you && typeof msg.you === 'object' ? _shareCloneJson(msg.you) : _shareCloneJson(_shareMeRoot);
+        _shareBindProxies();
+        _shareGuestsById = new Map();
+        const guests = Array.isArray(msg.guests) ? msg.guests : [];
+        for (let i = 0; i < guests.length; i++) {
+          const g = guests[i];
+          if (g && g.id) {
+            _shareGuestsById.set(g.id, g.data && typeof g.data === 'object' ? _shareCloneJson(g.data) : {});
+          }
+        }
+        _shareRebuildGuestsArray();
+      } finally {
+        _shareApplyingRemote = false;
+      }
+      _shareSetKept(msg.keep);
+      if (_shareProfile && _shareProfile.keep && !window.shareKept) {
+        debugWarn('share: keep was asked for, but this room is not kept. Either the room was ' +
+          'created without keep and is still open, or the server is older (redeploy the P5PhoneShare worker from p5-phone).');
+      }
+      // The welcome says whether the server used the quiet option. An older server ignores it.
+      window.shareQuiet = msg.quiet === true;
+      if (_shareProfile && _shareProfile.quiet && !window.shareQuiet) {
+        debugWarn('share: quiet was asked for, but the server does not support it, so it sends ' +
+          'everything (redeploy the P5PhoneShare worker from p5-phone). guests will still update live.');
+      }
+      window.shareConnected = true;
+      window.shareStatus = 'connected';
+      window.shareError = '';
+      if (!_shareReadySent) {
+        _shareReadySent = true;
+        if (typeof shareReady === 'function') {
+          shareReady();
+        }
+      }
+      debug('share welcome id=' + window.shareClientId + ' host=' + window.shareIsHost);
+      break;
+    }
+    case 'patch':
+      _shareApplyRemotePatch(msg, msg.clientId);
+      break;
+    case 'batch': {
+      const ops = Array.isArray(msg.ops) ? msg.ops : [];
+      for (let i = 0; i < ops.length; i++) {
+        if (ops[i] && typeof ops[i] === 'object') _shareApplyRemotePatch(ops[i], msg.clientId);
+      }
+      break;
+    }
+    case 'presence': {
+      const before = _shareGuestsById;
+      _shareGuestsById = new Map();
+      const guests = Array.isArray(msg.guests) ? msg.guests : [];
+      for (let i = 0; i < guests.length; i++) {
+        const g = guests[i];
+        if (g && g.id && g.id !== window.shareClientId) {
+          _shareGuestsById.set(g.id, g.data && typeof g.data === 'object' ? _shareCloneJson(g.data) : {});
+        }
+      }
+      _shareRebuildGuestsArray();
+      // The worker names who joined or left. guests is already up to date when these run.
+      if (typeof msg.joined === 'string' && msg.joined !== window.shareClientId &&
+          _shareGuestsById.has(msg.joined) && typeof shareJoined === 'function') {
+        shareJoined(msg.joined, _shareGuestsById.get(msg.joined));
+      }
+      if (typeof msg.left === 'string' && msg.left !== window.shareClientId &&
+          typeof shareLeft === 'function') {
+        shareLeft(msg.left, before.get(msg.left) || {});
+      }
+      break;
+    }
+    case 'host': {
+      const wasHost = window.shareIsHost;
+      window.shareIsHost = !!msg.isHost;
+      if (wasHost !== window.shareIsHost && typeof shareHostChanged === 'function') {
+        shareHostChanged(window.shareIsHost);
+      }
+      break;
+    }
+    case 'emit':
+      if (typeof shareEvent === 'function') {
+        // The worker stamps every event with the sender's id, so a sketch can tell who sent it.
+        shareEvent(msg.name, msg.data, typeof msg.clientId === 'string' ? msg.clientId : null);
+      }
+      break;
+    case 'kept':
+      // Each change moves the deadline; the server says where it is now.
+      _shareSetKept(msg);
+      break;
+    case 'reset':
+      _shareApplyReset(msg.shared);
+      break;
+    case 'error':
+      // A write the worker rejected is never echoed; stop waiting on pending writes.
+      _sharePending = new Map();
+      window.shareError = msg.message || 'Share server error';
+      // A rejected write leaves the connection up; only a failed join is an error state.
+      if (!window.shareConnected) window.shareStatus = 'error';
+      debugError('share: ' + window.shareError);
+      break;
+    default:
+      break;
+  }
+}
+
+function _shareClearReconnect() {
+  if (_shareReconnectTimer) {
+    clearTimeout(_shareReconnectTimer);
+    _shareReconnectTimer = null;
+  }
+}
+
+function _shareScheduleReconnect() {
+  if (!_shareProfile || !_shareProfile.autoReconnect || _shareReconnectStopped) return;
+  if (_shareReconnectTimer) return;
+  const delay = _SHARE_RECONNECT_DELAYS[
+    Math.min(_shareReconnectAttempt, _SHARE_RECONNECT_DELAYS.length - 1)
+  ];
+  _shareReconnectAttempt += 1;
+  debug('share reconnect in ' + delay + 'ms (attempt ' + _shareReconnectAttempt + ')');
+  _shareReconnectTimer = setTimeout(function() {
+    _shareReconnectTimer = null;
+    shareConnect().catch(function() {});
+  }, delay);
+}
+
+function shareConnect() {
+  if (!_shareProfile) {
+    debugError('Call shareSetup() before shareConnect().');
+    return Promise.reject(new Error('shareSetup required'));
+  }
+  if (!isShareSupported()) {
+    return Promise.reject(new Error(window.shareError || 'WebSocket unsupported'));
+  }
+
+  _shareReconnectStopped = false;
+  _shareHiddenClosed = false;
+  _shareClearReconnect();
+  if (_shareProfile.keepScreenOn) _keepScreenOnCore(true);
+
+  if (_shareSocket && (_shareSocket.readyState === WebSocket.OPEN || _shareSocket.readyState === WebSocket.CONNECTING)) {
+    return Promise.resolve();
+  }
+
+  window.shareStatus = 'connecting';
+  window.shareError = '';
+  window.shareConnected = false;
+  _shareReadySent = false;
+
+  return new Promise(function(resolve, reject) {
+    let settled = false;
+    const url = _shareWsUrl();
+    debug('share connecting ' + url);
+
+    let socket;
+    try {
+      socket = new WebSocket(url);
+    } catch (err) {
+      window.shareStatus = 'error';
+      window.shareError = err && err.message ? err.message : String(err);
+      reject(err);
+      return;
+    }
+
+    _shareSocket = socket;
+
+    socket.onopen = function() {
+      _shareReconnectAttempt = 0;
+      const hello = {
+        type: 'hello',
+        v: _SHARE_PROTOCOL_VERSION,
+        app: _shareProfile.app,
+        room: _shareProfile.room,
+        // Current state, not the shareSetup() seed: me set before joining or before a
+        // reconnect survives, and an emptied room is reseeded from where it was. A kept
+        // room is the exception: its content must be able to expire, so a phone that
+        // comes back to a room that was kept offers only its starting value.
+        me: _shareCloneJson(_shareMeRoot),
+        shared: _shareCloneJson(_shareKeptSeen ? _shareProfile.shared : _shareSharedRoot)
+      };
+      if (_shareProfile.keep) hello.keep = { expire: _shareProfile.keep.expire };
+      if (_shareProfile.quiet) hello.quiet = true;
+      _shareSend(hello);
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+
+    socket.onmessage = function(event) {
+      if (_shareSocket !== socket) return; // replaced by a newer connection
+      _shareHandleMessage(event.data);
+    };
+
+    socket.onerror = function() {
+      window.shareStatus = 'error';
+      if (!window.shareError) {
+        window.shareError = 'Share WebSocket error';
+      }
+      if (!settled) {
+        settled = true;
+        reject(new Error(window.shareError));
+      }
+    };
+
+    socket.onclose = function() {
+      if (_shareSocket && _shareSocket !== socket) return; // replaced by a newer connection
+      const wasConnected = window.shareConnected;
+      window.shareConnected = false;
+      if (window.shareStatus !== 'unsupported') {
+        window.shareStatus = _shareReconnectStopped || _shareHiddenClosed ? 'idle' : 'error';
+      }
+      if (_shareSocket === socket) {
+        _shareSocket = null;
+      }
+      _shareClearQueues();
+      // A page that is out of the room must not keep counting phones it can no longer see.
+      _shareGuestsById = new Map();
+      _shareRebuildGuestsArray();
+      if (wasConnected && typeof shareClosed === 'function') {
+        shareClosed();
+      }
+      if (!_shareReconnectStopped && !_shareHiddenClosed) {
+        _shareScheduleReconnect();
+      }
+    };
+  });
+}
+
+// Close with an explicit code. A bare close() sends no status, and PartyServer cannot
+// echo the reserved 1005 back, so the socket would sit half-open on the phone.
+function _shareCloseSocket(reason) {
+  if (!_shareSocket) return;
+  try {
+    _shareSocket.close(1000, reason || 'bye');
+  } catch (e) { /* ignore */ }
+}
+
+function shareDisconnect() {
+  _shareReconnectStopped = true;
+  _shareHiddenClosed = false;
+  _shareClearReconnect();
+  _shareClearQueues();
+  if (_shareSocket) {
+    _shareCloseSocket('disconnect');
+    _shareSocket = null;
+  }
+  window.shareConnected = false;
+  window.shareStatus = 'idle';
+  window.shareIsHost = false;
+  window.shareClientId = '';
+  window.shareKept = false;
+  window.shareKeptUntil = 0;
+  window.shareQuiet = false;
+  _shareReadySent = false;
+  _shareGuestsById = new Map();
+  _shareRebuildGuestsArray();
+}
+
+function _shareBindVisibility() {
+  if (_shareVisibilityBound || typeof document === 'undefined') return;
+  _shareVisibilityBound = true;
+  document.addEventListener('visibilitychange', function() {
+    if (!_shareProfile || !_shareProfile.disconnectWhenHidden || _shareReconnectStopped) return;
+    if (document.visibilityState === 'hidden') {
+      if (!_shareSocket && !_shareReconnectTimer) return;
+      _shareHiddenClosed = true;
+      _shareClearReconnect();
+      _shareFlush();
+      _shareCloseSocket('hidden');
+    } else if (_shareHiddenClosed) {
+      shareConnect().catch(function() {});
+    }
+  });
+}
+
 function _normalizePermissionList(permissions) {
   const aliasMap = {
     sensor: 'sensors',
@@ -2557,7 +3825,10 @@ function _normalizePermissionList(permissions) {
     geolocation: 'geo',
     camera: 'camera',
     video: 'camera',
-    webcam: 'camera'
+    webcam: 'camera',
+    share: 'share',
+    room: 'share',
+    rooms: 'share'
   };
 
   const source = Array.isArray(permissions)
@@ -2601,7 +3872,7 @@ function _normalizePermissionList(permissions) {
   }
 
   if (normalized.length === 0) {
-    console.warn('three-phone: No valid permission types provided. Use sensors, mic, sound, speech, vibration, torch, nfc, geo, or camera.');
+    console.warn('three-phone: No valid permission types provided. Use sensors, mic, sound, speech, vibration, torch, nfc, geo, camera or share.');
   }
 
   return normalized;
@@ -2609,6 +3880,9 @@ function _normalizePermissionList(permissions) {
 
 async function _requestPermissionsCore(permissions) {
   const normalized = _normalizePermissionList(permissions);
+
+  // Joining keeps the screen on, and a wake lock is surest asked for inside the tap.
+  if (normalized.includes('share') && (!_shareProfile || _shareProfile.keepScreenOn)) _keepScreenOnCore(true);
 
   for (const permission of normalized) {
     if (permission === 'sensors') {
@@ -2629,6 +3903,8 @@ async function _requestPermissionsCore(permissions) {
       await _requestGeoPermissionCore();
     } else if (permission === 'camera') {
       await _requestCameraPermissionCore();
+    } else if (permission === 'share') {
+      _requestShareJoinCore();
     }
   }
 
@@ -4302,7 +5578,9 @@ window.enableGeoButton = enableGeoButton;
 window.enableCameraTap = enableCameraTap;
 window.enableCameraButton = enableCameraButton;
 window.enableBleTap = enableBleTap;
+window.enableShareTap = enableShareTap;
 window.enableBleButton = enableBleButton;
+window.enableShareButton = enableShareButton;
 window.enableAllTap = enableAllTap;
 window.enableAllButton = enableAllButton;
 window.enableARTap = enableARTap;
@@ -4324,6 +5602,7 @@ window.enableFlashlightCanvas = enableFlashlightCanvas;
 window.enableNfcCanvas = enableNfcCanvas;
 window.enableGeoCanvas = enableGeoCanvas;
 window.enableBleCanvas = enableBleCanvas;
+window.enableShareCanvas = enableShareCanvas;
 window.enableAllCanvas = enableAllCanvas;
 window.enableARCanvas = enableARCanvas;
 window.enableCameraCanvas = enableCameraCanvas;
@@ -4342,6 +5621,7 @@ window.enableFlashlightBanner = enableFlashlightBanner;
 window.enableNfcBanner = enableNfcBanner;
 window.enableGeoBanner = enableGeoBanner;
 window.enableBleBanner = enableBleBanner;
+window.enableShareBanner = enableShareBanner;
 window.enableAllBanner = enableAllBanner;
 window.enableARBanner = enableARBanner;
 window.enableCameraBanner = enableCameraBanner;
@@ -4360,6 +5640,7 @@ window.enableFlashlightOn = enableFlashlightOn;
 window.enableNfcOn = enableNfcOn;
 window.enableGeoOn = enableGeoOn;
 window.enableBleOn = enableBleOn;
+window.enableShareOn = enableShareOn;
 window.enableAllOn = enableAllOn;
 window.enableAROn = enableAROn;
 window.enableCameraOn = enableCameraOn;
@@ -4403,6 +5684,21 @@ window.bleConnect = bleConnect;
 window.bleDisconnect = bleDisconnect;
 window.bleRead = bleRead;
 window.bleWrite = bleWrite;
+
+// Share (multi-user rooms) + screen wake lock
+window.isShareSupported = isShareSupported;
+window.shareSetup = shareSetup;
+window.shareConnect = shareConnect;
+window.shareDisconnect = shareDisconnect;
+window.shareSet = shareSet;
+window.shareSetMe = shareSetMe;
+window.shareEmit = shareEmit;
+window.shareClear = shareClear;
+window.shareGuest = shareGuest;
+window.guestsWith = guestsWith;
+window.shareStatusText = shareStatusText;
+window.getShareJoinUrl = getShareJoinUrl;
+window.keepScreenOn = keepScreenOn;
 
 // Audio (mic metering + audio-context unlock)
 window.getAudioContext = getAudioContext;

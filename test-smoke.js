@@ -52,7 +52,7 @@ vm.runInContext(src, sandbox, { filename: 'three-phone.js' });
 
 // The public API three-phone promises. Grouped for readable failures.
 const FEATURES = ['Gyro', 'Sensor', 'Mic', 'Sound', 'Speech', 'Vibration',
-  'Torch', 'Flashlight', 'Nfc', 'Geo', 'Ble', 'Camera', 'AR', 'All',
+  'Torch', 'Flashlight', 'Nfc', 'Geo', 'Ble', 'Share', 'Camera', 'AR', 'All',
   'Permissions', 'Hardware'];
 const STYLES = ['Tap', 'Button', 'Canvas', 'Banner', 'On'];
 
@@ -72,6 +72,10 @@ const expected = new Set([
   'stopGeo', 'setGeoOptions', 'getGeoPosition', 'geoDistance', 'geoInPolygon',
   // BLE
   'isBleSupported', 'bleSetup', 'bleConnect', 'bleDisconnect', 'bleRead', 'bleWrite',
+  // Share (multi-user rooms) + screen wake lock
+  'isShareSupported', 'shareSetup', 'shareConnect', 'shareDisconnect', 'shareSet', 'shareSetMe',
+  'shareEmit', 'shareClear', 'shareGuest', 'guestsWith', 'shareStatusText', 'getShareJoinUrl',
+  'keepScreenOn',
   // Audio
   'getAudioContext', 'getMicLevel', 'getMicStream',
   // Camera
@@ -105,6 +109,9 @@ const statusGlobals = ['sensorsEnabled', 'micEnabled', 'soundEnabled', 'gestures
   'vibrationEnabled', 'speechEnabled', 'nfcEnabled', 'cameraEnabled', 'torchEnabled',
   'bleSupported', 'bleConnected', 'bleValues', 'geoEnabled', 'lastGeoPosition',
   'micLevel', 'THREE_PHONE_VERSION',
+  // Share + wake lock status
+  'shareSupported', 'shareConnected', 'shareStatus', 'shareError', 'shareRoom', 'shareClientId',
+  'shareIsHost', 'shareKept', 'shareKeptUntil', 'shareQuiet', 'shared', 'me', 'guests', 'screenAwake',
   // AR / WebXR status
   'arEnabled', 'xrSupported', 'xrEnabled', 'xrActive',
   // Motion + touch data globals
