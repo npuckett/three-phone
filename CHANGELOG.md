@@ -6,6 +6,17 @@ All notable changes to three-phone are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Enabling tap left a ghost touch.** The Tap, Button and Banner activation UIs (every
+  `enable…Tap/Button/Banner()`, `enablePermissions…`, and `enableXRTap/Button()`) called
+  `stopPropagation()` on the release (`pointerup` / `touchend`) but not on the press. three-phone's
+  touch tracking listens on `window`, so it saw the press and never the release: `touches[]` kept a
+  phantom entry and `touchEnded()` never fired until the next complete tap. Affected touch and mouse.
+  The release now propagates, as in p5-phone; `preventDefault()` on `touchend` is kept so the
+  synthesized click cannot land on the page once the UI is removed. `enable…On()` and `enableXROn()`
+  no longer stop the `touchend` either, so a sketch's own window listeners see it.
+  `npm run test:press` (Playwright, Pixel 7 touch and desktop mouse) checks every style.
+
 ## [0.2.0] - 2026-10-08
 
 Augmented-reality release: magic-window AR everywhere, plus WebXR immersive-ar on Android Chrome.
