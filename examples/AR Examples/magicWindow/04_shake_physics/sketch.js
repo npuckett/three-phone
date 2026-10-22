@@ -1,22 +1,25 @@
 // ==============================================
 // SHAKE PHYSICS
 // ==============================================
-// Tap to drop shapes into the room (like Tap to Place), but now they fall,
-// bounce off an invisible floor, and drift a little with your motion. Shake
-// the phone to toss them up with a haptic buzz. Each shape is pulled back
-// toward the spot where you dropped it, so it lands there again.
+// Tap once to start. Then tap to drop shapes into the room (like Tap to
+// Place). Now they fall, bounce off an invisible floor, and drift a little
+// with your motion. Shake the phone to toss them up with a buzz. Each shape
+// is pulled back toward the spot where you dropped it, so it lands there
+// again. A hint at the bottom says what to do.
 //
 // three-phone APIs: createPhoneCamera() + cam.attachBackground(),
 // enablePermissionsTap(['sensors','camera','vibration']) (motion + camera +
 // haptics in one tap), touchStarted(), getTouchRaycaster(), applyDeviceRotation(),
 // deviceShaken() + setShakeThreshold() + vibrate(), accelerationX/Y,
-// setPhoneCanvas(), lockGestures(), showDebug(), window.arEnabled.
+// setPhoneCanvas(), lockGestures(), window.arEnabled, the permissionsReady
+// event (fires once the tap has started everything).
 // Platforms: iOS Safari + Android Chrome (HTTPS required for camera + sensors).
 // ==============================================
 
 let renderer, scene, camera, cam, raycaster;
 let bodies = [];
 const MAX = 30;
+let hasMotion = false; // true once the phone sends a tilt reading
 const FLOOR = -1.5;      // invisible floor plane (metres below eye level)
 const PULL = 3;          // how hard each shape is pulled back to its spot
 const MAX_SPEED = 8;     // m/s, so nothing flies off
@@ -46,12 +49,15 @@ function init() {
   cam = createPhoneCamera('environment', false, 'cover');
   cam.onReady(() => cam.attachBackground(scene)); // camera feed becomes the background
 
-  showDebug();
   setPhoneCanvas(renderer);
   // Motion goes first. An iPhone only asks for motion straight from the tap.
-  enablePermissionsTap(['sensors', 'camera', 'vibration'], 'Tap to start');
+  enablePermissionsTap(['sensors', 'camera', 'vibration'], 'Tap to start. Then tap to drop shapes.');
   setShakeThreshold(25);
   lockGestures();
+  // Once the tap has started everything, show what to do.
+  addEventListener('permissionsReady', () => showHint('Tap to drop shapes. Shake the phone to toss them up.'), { once: true });
+  // The phone's first tilt reading. Until it comes, the view looks straight ahead.
+  addEventListener('deviceorientation', (e) => { if (e.beta !== null) hasMotion = true; });
   addEventListener('resize', onResize);
   animate();
 }
@@ -87,8 +93,6 @@ function touchStarted() {
     old.geometry.dispose();
     old.material.dispose();
   }
-
-  debug(bodies.length + ' bodies');
 }
 
 // Shake: toss everything up with a haptic buzz. One shake counts once.
@@ -104,7 +108,6 @@ function deviceShaken() {
     b.userData.vel.z += (Math.random() - 0.5) * 1;
   }
   vibrate(80);
-  debug('shake!');
 }
 
 function animate() {
@@ -144,7 +147,7 @@ function animate() {
     b.rotation.z += v.z * dt;
   }
 
-  if (window.arEnabled) applyDeviceRotation(camera, { smooth: 0.15 });
+  if (window.arEnabled && hasMotion) applyDeviceRotation(camera, { smooth: 0.15 });
 
   renderer.render(scene, camera);
 }
@@ -154,6 +157,22 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   if (cam) cam.updateBackground();
+}
+
+// A short line of instructions at the bottom of the screen.
+// Touches pass straight through it.
+function showHint(text) {
+  const hint = document.createElement('div');
+  hint.id = 'hint';
+  hint.textContent = text;
+  hint.style.cssText =
+    'position:fixed; left:50%; bottom:24px; transform:translateX(-50%);' +
+    'width:max-content; max-width:90vw; box-sizing:border-box;' +
+    'padding:10px 18px; border-radius:20px; background:rgba(0,0,0,0.55);' +
+    'color:#fff; text-align:center;' +
+    'font:16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
+    'pointer-events:none; z-index:10;';
+  document.body.appendChild(hint);
 }
 
 init();

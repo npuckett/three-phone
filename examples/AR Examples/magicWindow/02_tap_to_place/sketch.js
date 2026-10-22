@@ -1,21 +1,23 @@
 // ==============================================
 // TAP TO PLACE
 // ==============================================
-// Start with an empty room. Tap the screen to drop a lit shape 3m out along
-// the direction you are aiming; it stays world-anchored as you look around.
-// The rear camera feed is the background, so shapes appear to float in space.
+// Start with an empty room. Tap once to start. Then each tap drops a lit
+// shape 3m out, where you are aiming. It stays in that spot in the room, so
+// turn around to see them all. The rear camera feed is the background, so the
+// shapes seem to float in space. A hint at the bottom says what to do.
 //
 // three-phone APIs: createPhoneCamera() + cam.attachBackground(),
 // enablePermissionsTap(['sensors','camera']) (motion + camera in one tap),
 // touchStarted() callback, getTouchRaycaster() (screen tap → ray),
-// applyDeviceRotation(), setPhoneCanvas(), lockGestures(), showDebug(),
-// window.arEnabled.
+// applyDeviceRotation(), setPhoneCanvas(), lockGestures(), window.arEnabled,
+// the permissionsReady event (fires once the tap has started everything).
 // Platforms: iOS Safari + Android Chrome (HTTPS required for camera + sensors).
 // ==============================================
 
 let renderer, scene, camera, cam, raycaster;
 let placed = [];
 const MAX = 30;
+let hasMotion = false; // true once the phone sends a tilt reading
 const _ray = new THREE.Vector3();
 
 function init() {
@@ -40,11 +42,14 @@ function init() {
   cam = createPhoneCamera('environment', false, 'cover');
   cam.onReady(() => cam.attachBackground(scene)); // camera feed becomes the background
 
-  showDebug();
   setPhoneCanvas(renderer);
   // Motion goes first. An iPhone only asks for motion straight from the tap.
-  enablePermissionsTap(['sensors', 'camera'], 'Tap to start AR');
+  enablePermissionsTap(['sensors', 'camera'], 'Tap to start. Then tap to drop shapes.');
   lockGestures();
+  // Once the tap has started everything, show what to do.
+  addEventListener('permissionsReady', () => showHint('Tap to drop a shape. Turn to see them all.'), { once: true });
+  // The phone's first tilt reading. Until it comes, the view looks straight ahead.
+  addEventListener('deviceorientation', (e) => { if (e.beta !== null) hasMotion = true; });
   addEventListener('resize', onResize);
   animate();
 }
@@ -80,8 +85,6 @@ function touchStarted() {
     old.geometry.dispose();
     old.material.dispose();
   }
-
-  debug(placed.length + ' placed');
 }
 
 function animate() {
@@ -93,7 +96,7 @@ function animate() {
     p.rotation.y += 0.006;
   }
 
-  if (window.arEnabled) applyDeviceRotation(camera, { smooth: 0.15 });
+  if (window.arEnabled && hasMotion) applyDeviceRotation(camera, { smooth: 0.15 });
 
   renderer.render(scene, camera);
 }
@@ -103,6 +106,22 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   if (cam) cam.updateBackground();
+}
+
+// A short line of instructions at the bottom of the screen.
+// Touches pass straight through it.
+function showHint(text) {
+  const hint = document.createElement('div');
+  hint.id = 'hint';
+  hint.textContent = text;
+  hint.style.cssText =
+    'position:fixed; left:50%; bottom:24px; transform:translateX(-50%);' +
+    'width:max-content; max-width:90vw; box-sizing:border-box;' +
+    'padding:10px 18px; border-radius:20px; background:rgba(0,0,0,0.55);' +
+    'color:#fff; text-align:center;' +
+    'font:16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
+    'pointer-events:none; z-index:10;';
+  document.body.appendChild(hint);
 }
 
 init();
