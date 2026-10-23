@@ -49,7 +49,7 @@ non-module script.
 
 ```html
 <!-- 1) three-phone: plain script, exposes window globals -->
-<script src="https://cdn.jsdelivr.net/npm/three-phone@0.2.0/dist/three-phone.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three-phone@0.3.0/dist/three-phone.min.js"></script>
 
 <!-- 2) three.js via import map -->
 <script type="importmap">

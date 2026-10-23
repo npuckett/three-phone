@@ -4,9 +4,11 @@ All notable changes to three-phone are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-23
 
-Share and the screen wake lock from p5-phone 1.16.0: many phones, one three.js scene.
+Share and the screen wake lock from p5-phone 1.16.0: many phones, one three.js scene. Also
+`window.isMobile` / `window.isDesktop`, a live background after a camera switch, and no ghost
+touch after the enabling tap.
 
 ### Added
 - **Share: multi-phone rooms with shared state**, ported from p5-phone 1.16.0 with the same API

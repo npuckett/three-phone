@@ -1,6 +1,6 @@
 {
   "name": "three-phone",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Simplified mobile hardware access for three.js - handle motion sensors, microphone, touch, camera, multi-phone Share rooms, and browser gestures with ease. Companion to p5-phone.",
   "main": "src/three-phone.js",
   "files": [

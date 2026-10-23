@@ -1,5 +1,5 @@
 /*!
- * three-phone v0.1.0
+ * three-phone v0.3.0
  * Simplified mobile hardware access for three.js - handle motion sensors,
  * microphone, touch, camera, and browser gestures with ease.
  * Companion to p5-phone (https://github.com/npuckett/p5-phone).
@@ -164,7 +164,7 @@ window.pmouseX = 0;
 window.pmouseY = 0;
 
 // three-phone version, for feature detection from sketches
-window.THREE_PHONE_VERSION = '0.2.0';
+window.THREE_PHONE_VERSION = '0.3.0';
 
 // Internal state
 let _nfcReader = null;

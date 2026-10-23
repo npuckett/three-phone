@@ -1,7 +1,7 @@
 ---
 name: three-phone
 description: Mobile hardware access (motion, touch, mic, camera, NFC, GPS, BLE, vibration, torch) and multi-phone Share rooms for three.js sketches. Use when a user builds a phone-sensor-driven or many-phones-one-scene three.js scene.
-version: 0.2.0
+version: 0.3.0
 ---
 
 # three-phone
@@ -32,7 +32,7 @@ It loads as a **classic `<script>`** and puts everything on `window`.
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>html, body { margin: 0; height: 100%; overflow: hidden; }</style>
-  <script src="https://cdn.jsdelivr.net/npm/three-phone@0.2.0/dist/three-phone.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three-phone@0.3.0/dist/three-phone.min.js"></script>
   <script type="importmap">
   { "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
