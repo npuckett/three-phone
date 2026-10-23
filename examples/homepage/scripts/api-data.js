@@ -8,11 +8,12 @@ window.THREEPHONE_PERMISSION_MATRIX = [
   { capability: 'NFC', status: 'window.nfcEnabled', tap: 'enableNfcTap(message)', button: 'enableNfcButton(text)', canvas: 'enableNfcCanvas(message)', banner: 'enableNfcBanner(message, position)', custom: 'enableNfcOn(selector)', notes: 'Android Chrome 89+ over HTTPS only. Use nfcRead(message, serialNumber).' },
   { capability: 'GPS / geolocation', status: 'window.geoEnabled', tap: 'enableGeoTap(message)', button: 'enableGeoButton(text)', canvas: 'enableGeoCanvas(message)', banner: 'enableGeoBanner(message, position)', custom: 'enableGeoOn(selector)', notes: 'iOS Safari + Android Chrome over HTTPS. Coarse by default; setGeoOptions({ enableHighAccuracy: true }) for real GPS. Use geoRead(position).' },
   { capability: 'Bluetooth (BLE)', status: 'window.bleConnected', tap: 'enableBleTap(options?)', button: 'enableBleButton(options?)', canvas: 'enableBleCanvas(options?)', banner: 'enableBleBanner(options?)', custom: 'enableBleOn(selector)', notes: 'Call bleSetup() first. Chrome/Edge over HTTPS. iOS: Bluefy browser.' },
+  { capability: 'Share (multi-phone room)', status: 'window.shareConnected', tap: 'enableShareTap(label | options?)', button: 'enableShareButton(label | options?)', canvas: 'enableShareCanvas(label | options?)', banner: 'enableShareBanner(label | options?)', custom: 'enableShareOn(selector)', notes: "Call shareSetup() first. Any browser with WebSocket. Joining also keeps the screen on. 'share' works in enablePermissions* lists." },
   { capability: 'Camera', status: 'window.cameraEnabled || cam.ready', tap: 'enableCameraTap(message)', button: 'enableCameraButton(text)', canvas: 'enableCameraCanvas(message)', banner: 'enableCameraBanner(message, position)', custom: 'enableCameraOn(selector)', notes: 'Pair with createPhoneCamera(); use cam.getTexture() / cam.createBackgroundMesh() to show the feed in three.js.' },
   { capability: 'AR (camera + sensors)', status: 'window.arEnabled', tap: 'enableARTap(message)', button: 'enableARButton(text)', canvas: 'enableARCanvas(message)', banner: 'enableARBanner(message, position)', custom: 'enableAROn(selector)', notes: "Sugar for enablePermissionsTap(['camera','sensors']). iOS shows two prompts (motion, then camera) from one tap." },
   { capability: 'WebXR immersive-ar', status: 'window.xrActive', tap: 'enableXRTap(message)', button: 'enableXRButton(text)', canvas: '—', banner: '—', custom: 'enableXROn(selector)', notes: 'Android Chrome over HTTPS only. Session request must happen inside the gesture; use renderer.setAnimationLoop.' },
   { capability: 'Motion + microphone', status: 'window.sensorsEnabled && window.micEnabled', tap: 'enableAllTap(message)', button: 'enableAllButton(text)', canvas: 'enableAllCanvas(message)', banner: 'enableAllBanner(message, position)', custom: 'enableAllOn(selector)', notes: 'Convenience flow for sketches that need both sensors and mic.' },
-  { capability: 'Any combination', status: 'depends on selected permissions', tap: "enablePermissionsTap(['sensors', 'torch'])", button: "enablePermissionsButton(['torch', 'vibration'], text)", canvas: "enablePermissionsCanvas(['camera', 'mic'])", banner: "enablePermissionsBanner(['sensors', 'nfc'], msg)", custom: "enablePermissionsOn(selector, ['camera', 'mic'])", notes: 'Use sensors, mic, sound, speech, vibration, torch, nfc, geo, and camera in any combination. enableHardware* aliases also work.' }
+  { capability: 'Any combination', status: 'depends on selected permissions', tap: "enablePermissionsTap(['sensors', 'torch'])", button: "enablePermissionsButton(['torch', 'vibration'], text)", canvas: "enablePermissionsCanvas(['camera', 'mic'])", banner: "enablePermissionsBanner(['sensors', 'nfc'], msg)", custom: "enablePermissionsOn(selector, ['camera', 'mic'])", notes: "Use sensors, mic, sound, speech, vibration, torch, nfc, geo, camera, and share in any combination (enablePermissionsTap(['gyro', 'share']) asks for motion and joins the room in one tap). enableHardware* aliases also work." }
 ];
 
 window.THREEPHONE_API_SECTIONS = [
@@ -169,6 +170,26 @@ window.THREEPHONE_API_SECTIONS = [
     ]
   },
   {
+    id: 'share',
+    title: 'Share (many phones, one room)',
+    description: "Sync plain JSON across phones in one room, so every phone changes the same 3D scene. Same API, wire protocol and server as p5-phone's Share: deploy p5-phone's P5PhoneShare worker (free Cloudflare tier) once for your project.",
+    relatedApis: [
+      { label: 'P5PhoneShare worker', href: 'https://github.com/npuckett/p5-phone/tree/main/companion/P5PhoneShare', summary: 'The PartyServer room three-phone and p5-phone both talk to. npx wrangler deploy prints your host URL.' },
+      { label: 'Screen Wake Lock API', href: 'https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API', summary: 'What keepScreenOn() and joining a room use.' }
+    ],
+    items: [
+      { name: 'shareSetup', signature: "shareSetup({ host, room, shared?, me?, keep?, quiet?, keepScreenOn? })", summary: "Configure the room in init(). ?shareHost= and ?room= in the address win (the console says so). keep: '24h' keeps shared after the last phone leaves; quiet: true skips the other phones' me changes; keepScreenOn: false skips the wake lock.", tags: ['share', 'setup'] },
+      { name: 'enableShareTap', signature: "enableShareTap('Tap to join')", summary: "Join from a gesture (also Button, Canvas, Banner, On). Runs userSetupComplete(). Or put 'share' in enablePermissionsTap(['gyro', 'share']). Low level: shareConnect() / shareDisconnect().", tags: ['tap', 'share'] },
+      { name: 'shared / me / guests', signature: 'shared.hue = 0.3; me.x = 1; for (const g of guests) ...', summary: "shared is the room's object, me is this phone's, guests the other phones' me (each with .id; empty while out of the room). Plain JSON only: no THREE.Vector3. shareSet(path, value) and shareSetMe(path, value) write by dotted path.", tags: ['share'] },
+      { name: 'shareEmit / shareEvent', signature: 'shareEmit(name, data?) → function shareEvent(name, data, from) {}', summary: "One-shot room events, not stored. from is the sender's id, so shareGuest(from) is its me.", tags: ['share', 'callback'] },
+      { name: 'shareReady / shareReceive / shareJoined / shareLeft', signature: 'function shareJoined(id, data) { ... }', summary: 'Optional callbacks: in the room; another phone changed a value (path, value); a phone joined after you; a phone left (its last me). Also shareHostChanged(isHost) and shareClosed().', tags: ['share', 'callback'] },
+      { name: 'shareGuest / guestsWith / shareStatusText', signature: "guestsWith('role', 'phone')", summary: 'shareGuest(id) finds a guest (or your own me); guestsWith(field, value?) filters guests; shareStatusText() is one sentence about the connection for a DOM label.', tags: ['share'] },
+      { name: 'shareClear / shareKept / shareQuiet', signature: 'shareClear()', summary: "shareClear() puts shared back to its starting value for every phone and erases the kept copy. shareKept / shareKeptUntil and shareQuiet say what the server agreed to.", tags: ['share', 'status'] },
+      { name: 'getShareJoinUrl', signature: 'getShareJoinUrl()', summary: 'This page with shareHost, room and app in the address, to send to others or put in your own QR code. isShareSupported() checks for WebSocket.', tags: ['share'] },
+      { name: 'keepScreenOn', signature: 'keepScreenOn(on = true) // Promise<boolean>', summary: 'Keep the screen on while the page shows, asking again when it comes back. Call it from a tap on iPhone. Joining a room calls it; window.screenAwake is true while it holds.', tags: ['share', 'wake lock'] }
+    ]
+  },
+  {
     id: 'vibration',
     title: 'Vibration',
     description: 'Haptics on Android (iOS Safari has no Vibration API).',
@@ -208,7 +229,7 @@ window.THREEPHONE_API_SECTIONS = [
     description: 'Guard hardware code with the positive-enabled pattern.',
     relatedApis: [],
     items: [
-      { name: 'window.sensorsEnabled', signature: 'if (window.sensorsEnabled) { ... }', summary: 'Also micEnabled, soundEnabled, speechEnabled, vibrationEnabled, torchEnabled, nfcEnabled, geoEnabled, cameraEnabled, bleConnected, gesturesLocked.', tags: ['status'] },
+      { name: 'window.sensorsEnabled', signature: 'if (window.sensorsEnabled) { ... }', summary: 'Also micEnabled, soundEnabled, speechEnabled, vibrationEnabled, torchEnabled, nfcEnabled, geoEnabled, cameraEnabled, bleConnected, shareConnected, screenAwake, gesturesLocked.', tags: ['status'] },
       { name: 'permissionsReady', signature: "addEventListener('permissionsReady', e => ...)", summary: 'A window CustomEvent dispatched after any permission succeeds; detail carries every flag.', tags: ['status', 'callback'] },
       { name: 'window.isMobile / window.isDesktop', signature: "createPhoneCamera(isMobile ? 'environment' : 'user')", summary: 'Device detection set once at load, same checks as p5-phone: mobile user agent, iPadOS (Mac user agent with touch), coarse pointer, or touch with no fine pointer. isDesktop is !isMobile.', tags: ['status'] }
     ]

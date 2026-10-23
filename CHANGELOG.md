@@ -6,7 +6,48 @@ All notable changes to three-phone are documented here. The format is based on
 
 ## [Unreleased]
 
+Share and the screen wake lock from p5-phone 1.16.0: many phones, one three.js scene.
+
 ### Added
+- **Share: multi-phone rooms with shared state**, ported from p5-phone 1.16.0 with the same API
+  names, the same wire protocol (v2) and the same server, p5-phone's
+  [P5PhoneShare](https://github.com/npuckett/p5-phone/tree/main/companion/P5PhoneShare)
+  Cloudflare worker. three-phone has no worker of its own, and a three.js page and a p5.js page
+  can be in one room together.
+  - `shareSetup({ host, room, app, shared, me, keep, quiet, autoReconnect, sendInterval,
+    disconnectWhenHidden, keepScreenOn })`. `?shareHost=`, `?room=` and `?app=` in the address win
+    over the config, and the console says so when they replace a value the sketch set.
+  - Joining: `enableShareTap/Button/Canvas/Banner/On` (a label string or an options object), each
+    running `userSetupComplete()` like the other `enable*` helpers; `'share'` (aliases `room`,
+    `rooms`) in `enablePermissions*` lists, which joins from the same tap without waiting for the
+    room; and `shareConnect()` / `shareDisconnect()`.
+  - The live objects `shared`, `me` and `guests` (each guest has an enumerable `id`, and `guests`
+    is empty while the page is out of the room), plus `shareSet(path, value)` and
+    `shareSetMe(path, value)` for dotted paths.
+  - `shareEmit(name, data)` and the `shareEvent(name, data, from)` callback, with the sender's id.
+  - Callbacks `shareReady`, `shareReceive(path, value)`, `shareClosed`, `shareHostChanged(isHost)`,
+    `shareJoined(id, data)` and `shareLeft(id, data)`, as global functions like `bleReceive`.
+  - Keep (`shareSetup({ keep: '24h' })`, `shareKept`, `shareKeptUntil`, `shareClear()`) and quiet
+    (`shareSetup({ quiet: true })`, `shareQuiet`).
+  - Helpers `shareGuest(id)`, `guestsWith(field, value?)`, `shareStatusText()`,
+    `getShareJoinUrl()` and `isShareSupported()`, and the status globals `shareSupported`,
+    `shareConnected`, `shareStatus`, `shareError`, `shareRoom`, `shareClientId`, `shareIsHost`.
+- **`keepScreenOn(on = true)`** and `window.screenAwake`: a screen wake lock that is asked for
+  again when the page comes back. Joining a Share room asks for it (inside the tap for `'share'` in
+  `enablePermissions*`); `shareSetup({ keepScreenOn: false })` turns that off.
+- **Example `share/01_shared_scene`**: every phone is a piece on one floor. Tap to move it, tilt to
+  lean it, tap the crystal to recolor it for everyone, shake to pulse every phone's crystal and
+  jump your piece on theirs. Joins with `enablePermissionsTap(['gyro', 'share'])`. Added to the
+  homepage (Input · Share), with a Share API section, a permission-matrix row and a
+  compatibility row.
+- `npm test` runs `test-share-contract.js` (102 checks: the path, JSON, URL, keep and quiet
+  helpers, and the worker's `protocol.ts` when a p5-phone checkout is found).
+- `npm run test:share` (`test-share-e2e.js`, 121 checks): starts `wrangler dev` for p5-phone's
+  worker and drives emulated phones in Chromium through every join style, sync, events with the
+  sender id, joins and leaves, the helpers, reconnect, hidden pages, host handoff, concurrent
+  writes, join links, the wake lock, keep, quiet and the example. It finds the worker through
+  `SHARE_SERVER_DIR`, `P5_PHONE_DIR`, or a `p5-phone` folder next to the repo, and uses that
+  checkout's Playwright when this repo has none.
 - **`window.isMobile` / `window.isDesktop`** — best-effort device detection, set once at load with
   the same checks as p5-phone: a mobile user agent, iPadOS (a Mac user agent with touch), a coarse
   primary pointer, or touch with no fine pointer. Sketches can now pick the rear camera on phones
@@ -25,6 +66,10 @@ All notable changes to three-phone are documented here. The format is based on
 - **Rapid camera toggles** — a second `cam.active` change made while the first switch was still
   opening its stream was dropped, so `cam.active` and the live camera disagreed. The switch now
   ends on the latest value.
+
+### Not ported
+- `enableShareMinimal()` and the desktop QR (`showDesktopQr()`): three-phone has no Minimal
+  permission style and no QR panel. `getShareJoinUrl()` gives the join link for a QR of your own.
 
 ## [0.2.0] - 2026-10-08
 

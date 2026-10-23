@@ -1,7 +1,7 @@
 {
   "name": "three-phone",
   "version": "0.2.0",
-  "description": "Simplified mobile hardware access for three.js - handle motion sensors, microphone, touch, camera, and browser gestures with ease. Companion to p5-phone.",
+  "description": "Simplified mobile hardware access for three.js - handle motion sensors, microphone, touch, camera, multi-phone Share rooms, and browser gestures with ease. Companion to p5-phone.",
   "main": "src/three-phone.js",
   "files": [
     "src/",
@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "npx terser src/three-phone.js --compress --mangle --output dist/three-phone.min.js && cp src/three-phone.js dist/three-phone.js",
-    "test": "node test-smoke.js && node test-motion-contract.js && node test-ble-contract.js && node test-geo-contract.js && node test-xr-contract.js && node test-camera-contract.js && node test-device-contract.js",
+    "test": "node test-smoke.js && node test-motion-contract.js && node test-ble-contract.js && node test-geo-contract.js && node test-xr-contract.js && node test-camera-contract.js && node test-device-contract.js && node test-share-contract.js",
+    "test:share": "node test-share-e2e.js",
     "prepublishOnly": "npm run build",
     "prepare": "npm run build",
     "version": "npm run build && git add dist && echo \"Version bumped to $npm_package_version\"",
@@ -49,7 +50,10 @@
     "devicemotion",
     "geolocation",
     "gps",
-    "webxr"
+    "webxr",
+    "multiplayer",
+    "websocket",
+    "wake-lock"
   ],
   "author": "Nick Puckett",
   "license": "MIT",

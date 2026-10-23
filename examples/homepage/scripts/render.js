@@ -48,6 +48,8 @@
     { tags: ['geo'], group: 'three-phone', label: 'enableGeoTap()', href: '#api-geo' },
     { tags: ['geoDistance'], group: 'three-phone', label: 'geoDistance()', href: '#api-geo' },
     { tags: ['ble'], group: 'three-phone', label: 'bleSetup() / enableBleTap()', href: '#api-ble' },
+    { tags: ['share'], group: 'three-phone', label: 'shareSetup() / enableShareTap()', href: '#api-share' },
+    { tags: ['multiplayer'], group: 'three-phone', label: 'shared / me / guests', href: '#api-share' },
     { tags: ['sound'], group: 'three-phone', label: 'enableSoundTap()', href: '#api-audio' },
     { tags: ['sound'], group: 'External', label: 'THREE.Audio / PositionalAudio', href: 'https://threejs.org/docs/#api/en/audio/Audio' },
     { tags: ['vibration'], group: 'three-phone', label: 'enableVibrationTap() / vibrate()', href: '#api-vibration' },
@@ -309,7 +311,7 @@
   function orderedSubcategories(category, groupedCategory) {
     const preferredOrder = {
       Start: ['Starter'],
-      Input: ['Touch', 'Movement', 'Microphone', 'Speech', 'BLE', 'NFC', 'GPS', 'Camera'],
+      Input: ['Touch', 'Movement', 'Microphone', 'Speech', 'BLE', 'NFC', 'GPS', 'Camera', 'Share'],
       'AR / XR': ['Magic Window', 'WebXR'],
       Output: ['Sound', 'Vibration', 'Torch', 'BLE'],
       Reference: ['UI Styles', 'Phone and GIF', 'UX Compare']

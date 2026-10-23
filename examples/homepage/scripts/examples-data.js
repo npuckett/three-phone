@@ -134,6 +134,12 @@ window.THREEPHONE_EXAMPLES = [
     description: 'Shaking flips the torch (enablePermissionsTap(["sensors","torch"])) with a flash.',
     path: 'Phone%20Sensor%20Examples/torch/03_shake_toggle/', sourcePath: 'examples/Phone%20Sensor%20Examples/torch/03_shake_toggle', capabilities: ['torch', 'motion', 'deviceShaken', 'combined permissions'], platforms: ['Android'] },
 
+  // ---------- Input · Share ----------
+  { id: 'share-scene', title: 'Shared Scene', category: 'Input', subcategory: 'Share', level: 'Intermediate', three: THREE_V,
+    description: "Many phones, one floor: tap to move your piece, tilt to lean it, tap the crystal to recolor it for everyone, shake to pulse. enablePermissionsTap(['gyro', 'share']).",
+    path: 'Phone%20Sensor%20Examples/share/01_shared_scene/', sourcePath: 'examples/Phone%20Sensor%20Examples/share/01_shared_scene', capabilities: ['share', 'multiplayer', 'touch', 'motion'], platforms: ['iOS', 'Android', 'Desktop'],
+    companion: { label: 'Room server (P5PhoneShare)', href: 'https://github.com/npuckett/p5-phone/tree/main/companion/P5PhoneShare', absolute: true } },
+
   // ---------- Output · BLE ----------
   { id: 'ble-send', title: 'BLE Send', category: 'Output', subcategory: 'BLE', level: 'Advanced', three: THREE_V,
     description: 'Tap a 3D switch to bleWrite() a boolean LED characteristic to the Arduino.',
