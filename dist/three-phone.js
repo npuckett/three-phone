@@ -4022,6 +4022,32 @@ function _notifySketchReady() {
 // UI CREATION HELPERS
 // =========================================
 
+// Bind click, touch and pointer activation to a permission UI element.
+// Never stopPropagation here: the touch subsystem (_installTouchListeners) tracks
+// presses with pointerdown/pointerup on window. The press has already reached it by
+// the time the release arrives, so swallowing the release leaves a ghost entry in
+// touches[] until the next complete tap and touchEnded() never fires. preventDefault
+// on touchend still suppresses the synthesized click so it cannot land on the page
+// once the UI is removed; the handler's own guard absorbs the click/touchend/pointerup
+// repeat.
+function _addActivationListeners(element, handler) {
+  element.addEventListener('click', handler);
+  element.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    handler();
+  });
+  element.addEventListener('pointerup', function(e) {
+    e.preventDefault();
+    // A touch pointerup is followed by touchend on the same element. A fast handler
+    // would remove the element in between, and a touchend dispatched to a detached
+    // element never reaches window, so a sketch's own window touchend listener would
+    // miss the release. Let touchend activate instead; click still covers browsers
+    // without touch events. Pen counts too: Apple Pencil also fires touch events on iPad.
+    if (e.pointerType !== 'mouse' && 'ontouchend' in window) return;
+    handler();
+  });
+}
+
 function _createPermissionButton(buttonText, statusText, onClickHandler) {
   _removeExistingUI();
   let activating = false;
@@ -4085,17 +4111,7 @@ function _createPermissionButton(buttonText, statusText, onClickHandler) {
     }
   };
 
-  button.addEventListener('click', handleButtonClick);
-  button.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleButtonClick();
-  });
-  button.addEventListener('pointerup', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleButtonClick();
-  });
+  _addActivationListeners(button, handleButtonClick);
 
   document.body.appendChild(button);
   document.body.appendChild(status);
@@ -4149,17 +4165,7 @@ function _createTapToEnable(message, onTapHandler) {
     }
   };
 
-  overlay.addEventListener('click', handleActivation);
-  overlay.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleActivation();
-  });
-  overlay.addEventListener('pointerup', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleActivation();
-  });
+  _addActivationListeners(overlay, handleActivation);
 
   document.body.appendChild(overlay);
 }
@@ -4327,17 +4333,7 @@ function _createBannerToEnable(message, position, onActivateHandler) {
     }, 300);
   };
 
-  banner.addEventListener('click', handleActivation);
-  banner.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleActivation();
-  });
-  banner.addEventListener('pointerup', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    handleActivation();
-  });
+  _addActivationListeners(banner, handleActivation);
 }
 
 /**
@@ -4361,10 +4357,11 @@ function _bindPermissionTo(selector, onActivateHandler) {
       await onActivateHandler();
     };
 
+    // No stopPropagation: a sketch's window listeners must see this touchend
+    // (see _addActivationListeners)
     element.addEventListener('click', handleActivation);
     element.addEventListener('touchend', function(e) {
       e.preventDefault();
-      e.stopPropagation();
       handleActivation();
     });
   };
@@ -5518,11 +5515,7 @@ function enableXRTap(message = 'Tap to enter AR', sessionInit) {
   _armXRControl({
     idleText: message,
     setText: (t) => { messageDiv.textContent = t; },
-    arm: (handler) => {
-      overlay.addEventListener('click', handler);
-      overlay.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
-      overlay.addEventListener('pointerup', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
-    },
+    arm: (handler) => _addActivationListeners(overlay, handler),
     remove: () => { if (overlay.parentNode) overlay.remove(); }
   }, sessionInit);
 }
@@ -5572,11 +5565,7 @@ function enableXRButton(text = 'ENTER AR', statusText = 'Entering AR…', sessio
     idleText: text,
     busyText: statusText,
     setText: (t) => { button.textContent = t; },
-    arm: (handler) => {
-      button.addEventListener('click', handler);
-      button.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
-      button.addEventListener('pointerup', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
-    },
+    arm: (handler) => _addActivationListeners(button, handler),
     remove: () => { if (button.parentNode) button.remove(); }
   }, sessionInit);
 }
@@ -5599,7 +5588,8 @@ function enableXROn(selector, sessionInit) {
       setText: () => {},   // leave the user's own element text untouched
       arm: (handler) => {
         element.addEventListener('click', handler);
-        element.addEventListener('touchend', function (e) { e.preventDefault(); e.stopPropagation(); handler(); });
+        // No stopPropagation: see _addActivationListeners
+        element.addEventListener('touchend', function (e) { e.preventDefault(); handler(); });
       },
       remove: () => {}     // leave the user's element in place
     }, sessionInit);

@@ -56,6 +56,15 @@ Share and the screen wake lock from p5-phone 1.16.0: many phones, one three.js s
   `npm test`.
 
 ### Fixed
+- **Enabling tap left a ghost touch.** The Tap, Button and Banner activation UIs (every
+  `enable…Tap/Button/Banner()`, `enablePermissions…`, and `enableXRTap/Button()`) called
+  `stopPropagation()` on the release (`pointerup` / `touchend`) but not on the press. three-phone's
+  touch tracking listens on `window`, so it saw the press and never the release: `touches[]` kept a
+  phantom entry and `touchEnded()` never fired until the next complete tap. Affected touch and mouse.
+  The release now propagates, as in p5-phone; `preventDefault()` on `touchend` is kept so the
+  synthesized click cannot land on the page once the UI is removed. `enable…On()` and `enableXROn()`
+  no longer stop the `touchend` either, so a sketch's own window listeners see it.
+  `npm run test:press` (Playwright, Pixel 7 touch and desktop mouse) checks every style.
 - **Background froze or went black after a camera switch** — setting `cam.active` after
   `cam.attachBackground(scene)` left `scene.background` on the disposed old `VideoTexture`. Now,
   once the new feed is live and before `onReady` fires, both background paths point at the new
