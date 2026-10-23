@@ -19,6 +19,7 @@ locking, or `DeviceOrientationEvent` quirks.
 - [Quick start](#quick-start)
 - [The permission model](#the-permission-model)
 - [Status flags](#status-flags)
+- [Device detection](#device-detection)
 - [Motion data](#motion-data)
 - [Touch & picking](#touch--picking)
 - [Microphone, sound & speech](#microphone-sound--speech)
@@ -156,6 +157,20 @@ Flags: `sensorsEnabled`, `micEnabled`, `soundEnabled`, `speechEnabled`, `vibrati
 `torchEnabled`/`torchActive`, `nfcEnabled`, `geoEnabled`, `cameraEnabled`, `bleConnected`,
 `gesturesLocked`.
 
+## Device detection
+
+`window.isMobile` and `window.isDesktop` are booleans set once when three-phone loads, using the
+same checks as p5-phone: a mobile user agent, iPadOS (which reports a Mac user agent but has
+touch), a coarse primary pointer, or touch with no fine pointer. `isDesktop` is `!isMobile`.
+
+```js
+// Rear camera, unmirrored, on phones and tablets; the mirrored webcam on laptops.
+const cam = createPhoneCamera(isMobile ? 'environment' : 'user', !isMobile, 'cover');
+```
+
+Use them for choices like this and for desktop-only hints. Gate hardware code on the
+`*Enabled` flags, not on `isMobile`.
+
 ## Motion data
 
 p5 provided motion values for free; three.js does not, so **three-phone owns them** and
@@ -248,6 +263,12 @@ enableCameraTap();
 - **mapping:** `cam.mapPoint(x, y)`, `cam.mapKeypoint(kp)`, `cam.mapKeypoints(kps)`,
   `cam.mapBox(box)`, `cam.mapBoxes(boxes)` — video space → canvas coordinates, mirror-aware.
 - `cam.getDimensions()`, `cam.ready`, `cam.width/height`, `cam.remove()`.
+- **switching:** set `cam.active = 'environment'` (or `'user'`) at any time. A background from
+  `attachBackground()` or `createBackgroundMesh()` moves to the new feed and is re-fit once it's
+  live. As in p5-phone, `onReady` is one-shot and doesn't fire again after a switch; call
+  `cam.onReady(cb)` after changing `active` to run code when the new feed is live. The switch
+  replaces the `<video>`, so restart anything that holds the old one, such as ml5's
+  `detectStart(cam.videoElement, …)`.
 
 The camera is created but not started until the `enableCamera*` gesture (fixes an iOS
 rotation bug). See the `examples/ml5/*` sketches for BodyPose / FaceMesh / HandPose.
@@ -454,8 +475,9 @@ Sensors, camera, NFC, GPS, and BLE need a **secure context** (HTTPS or `localhos
   `getMicLevel()` instead of `p5.AudioIn.getLevel()`.
 - **Camera** renders through `getTexture()` / `createBackgroundMesh()` instead of p5's
   `image()`.
-- Everything else — the permission matrix, status flags, NFC, GPS, BLE, vibration, torch,
-  and the debug console — matches p5-phone's API names.
+- Everything else — the permission matrix, status flags, device detection (`isMobile` /
+  `isDesktop`), NFC, GPS, BLE, vibration, torch, and the debug console — matches p5-phone's API
+  names.
 
 ## License
 

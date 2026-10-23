@@ -6,6 +6,26 @@ All notable changes to three-phone are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`window.isMobile` / `window.isDesktop`** — best-effort device detection, set once at load with
+  the same checks as p5-phone: a mobile user agent, iPadOS (a Mac user agent with touch), a coarse
+  primary pointer, or touch with no fine pointer. Sketches can now pick the rear camera on phones
+  with `createPhoneCamera(isMobile ? 'environment' : 'user', …)`.
+- **Tests** — `test-camera-contract.js` (camera switching) and `test-device-contract.js`, both in
+  `npm test`.
+
+### Fixed
+- **Background froze or went black after a camera switch** — setting `cam.active` after
+  `cam.attachBackground(scene)` left `scene.background` on the disposed old `VideoTexture`. Now,
+  once the new feed is live and before `onReady` fires, both background paths point at the new
+  texture and are re-fit to its aspect ratio. The `createBackgroundMesh()` path did get the new
+  texture before, but it wasn't re-fit, so a feed with a different aspect ratio stretched. The old
+  texture is disposed after the swap. A `scene.background` the sketch has replaced since is left
+  alone, and `updateBackground()` now only fits the camera's own texture.
+- **Rapid camera toggles** — a second `cam.active` change made while the first switch was still
+  opening its stream was dropped, so `cam.active` and the live camera disagreed. The switch now
+  ends on the latest value.
+
 ## [0.2.0] - 2026-10-08
 
 Augmented-reality release: magic-window AR everywhere, plus WebXR immersive-ar on Android Chrome.

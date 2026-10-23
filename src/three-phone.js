@@ -278,6 +278,48 @@ function _findThreeCanvas() {
 }
 
 // =========================================
+// DEVICE DETECTION (mobile vs desktop)
+// Same checks as p5-phone's _isMobileDevice(), so window.isMobile /
+// window.isDesktop mean the same thing in both libraries.
+// =========================================
+
+let _isMobileCached;
+
+/**
+ * Best-effort mobile-device detection. Combines user-agent, touch, and pointer
+ * signals; evaluated once and cached.
+ * @returns {boolean}
+ */
+function _isMobileDevice() {
+  if (_isMobileCached !== undefined) return _isMobileCached;
+  let mobile = false;
+  try {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    // Classic mobile UA tokens.
+    if (/android|iphone|ipod|blackberry|iemobile|opera mini|mobile|windows phone/i.test(ua)) {
+      mobile = true;
+    }
+    // iPadOS 13+ reports as Mac desktop UA but has touch.
+    if (!mobile && /mac/i.test(ua) && navigator.maxTouchPoints > 1) {
+      mobile = true;
+    }
+    // Coarse primary pointer (finger, not mouse).
+    if (!mobile && window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+      mobile = true;
+    }
+    // Touch-only device with no fine pointer.
+    if (!mobile && navigator.maxTouchPoints > 0 && window.matchMedia &&
+        !window.matchMedia('(any-pointer: fine)').matches) {
+      mobile = true;
+    }
+  } catch (e) {
+    mobile = false;
+  }
+  _isMobileCached = mobile;
+  return mobile;
+}
+
+// =========================================
 // PUBLIC API - CALL THESE FROM YOUR SKETCH
 // =========================================
 
@@ -3577,6 +3619,8 @@ class PhoneCamera {
     this._bgWidth = 0;
     this._bgHeight = 0;
     this._bgScene = null;  // scene whose .background we drive (attachBackground)
+    this._oldTextures = []; // textures from replaced feeds, disposed once the new feed is bound
+    this._switching = false;
 
     if (!window._phoneCameras) window._phoneCameras = [];
     window._phoneCameras.push(this);
@@ -3599,7 +3643,7 @@ class PhoneCamera {
     }
     if (this._active !== value) {
       this._active = value;
-      if (this._ready || this._video) this._switchCamera();
+      if (this._ready || this._video || this._switching) this._switchCamera();
     }
   }
   get mirror() { return this._mirror; }
@@ -3618,6 +3662,11 @@ class PhoneCamera {
   get fixedHeight() { return this._fixedHeight; }
   set fixedHeight(value) { this._fixedHeight = Math.max(1, value); }
 
+  /**
+   * Run callback once the feed is live (immediately if it already is). One-shot,
+   * as in p5-phone: a camera switch does not re-fire it — call onReady() again
+   * after setting `active` to know when the new feed is live.
+   */
   onReady(callback) {
     this._onReadyCallback = callback;
     if (this._ready && this._video && this._video.readyState >= 2) {
@@ -3651,7 +3700,9 @@ class PhoneCamera {
       try { await v.play(); } catch (e) { /* will play on loadeddata */ }
 
       const markReady = () => {
+        if (this._video !== v) return; // a later switch already replaced this feed
         this._ready = true;
+        this._rebindBackground();
         if (this._onReadyCallback) {
           const cb = this._onReadyCallback;
           this._onReadyCallback = null;
@@ -3667,19 +3718,58 @@ class PhoneCamera {
   }
 
   async _switchCamera() {
+    // A toggle that lands while a switch is still opening its stream is picked
+    // up by the loop, so the feed always ends on the latest `active`.
+    if (this._switching) return;
+    this._switching = true;
+    try {
+      let facing;
+      do {
+        facing = this._active;
+        this._stopFeed();
+        await this._initializeCamera();
+      } while (this._video && this._active !== facing);
+      console.log('✅ PhoneCamera switched to ' + this._active + ' camera');
+    } finally {
+      this._switching = false;
+    }
+  }
+
+  // Stop the stream and drop the <video>. The texture is not disposed here:
+  // scene.background / the overlay mesh may still show it, and three.js would
+  // just re-upload a disposed texture it still renders. _rebindBackground()
+  // swaps those over to the new feed and disposes it then.
+  _stopFeed() {
     if (this._stream) this._stream.getTracks().forEach(t => t.stop());
     if (this._video && this._video.parentNode) this._video.parentNode.removeChild(this._video);
-    if (this._texture && this._texture.dispose) this._texture.dispose();
+    if (this._texture) this._oldTextures.push(this._texture);
     this._video = null;
     this._stream = null;
     this._texture = null;
     this._ready = false;
-    await this._initializeCamera();
-    if (this._bgMesh) {
-      this._bgMesh.material.map = this.getTexture();
-      this._bgMesh.material.needsUpdate = true;
+  }
+
+  // Runs when a new feed goes live (before onReady fires). Re-points every
+  // background still showing a replaced feed at the new texture, re-fits it
+  // (the new stream can have a different aspect), and disposes the old
+  // textures. A background the sketch has since reassigned is left alone.
+  _rebindBackground() {
+    if (!this._oldTextures.length) return;
+    const old = this._oldTextures;
+    this._oldTextures = [];
+    const tex = this.getTexture();
+    if (tex) {
+      const mat = this._bgMesh && this._bgMesh.material;
+      if (mat && old.includes(mat.map)) {
+        mat.map = tex;
+        mat.needsUpdate = true;
+      }
+      if (this._bgScene && old.includes(this._bgScene.background)) {
+        this._bgScene.background = tex;
+      }
+      this.updateBackground();
     }
-    console.log('✅ PhoneCamera switched to ' + this._active + ' camera');
+    old.forEach(t => { if (t.dispose) t.dispose(); });
   }
 
   _canvasSize() {
@@ -3690,13 +3780,9 @@ class PhoneCamera {
   }
 
   remove() {
-    if (this._stream) this._stream.getTracks().forEach(t => t.stop());
-    if (this._video && this._video.parentNode) this._video.parentNode.removeChild(this._video);
-    if (this._texture && this._texture.dispose) this._texture.dispose();
-    this._video = null;
-    this._stream = null;
-    this._texture = null;
-    this._ready = false;
+    this._stopFeed();
+    this._oldTextures.forEach(t => { if (t.dispose) t.dispose(); });
+    this._oldTextures = [];
     if (window._phoneCameras && Array.isArray(window._phoneCameras)) {
       const idx = window._phoneCameras.indexOf(this);
       if (idx !== -1) window._phoneCameras.splice(idx, 1);
@@ -3922,15 +4008,17 @@ class PhoneCamera {
 
   /** Re-fit the background texture (cover) to the canvas + video aspect. Call on resize. */
   updateBackground() {
-    if (!window.THREE) return;
+    const tex = this._texture;
+    if (!window.THREE || !tex) return;
+    // Only the camera's own texture is fit; a background the sketch swapped in is left alone.
     // Overlay-mesh path (createBackgroundMesh): fit against the mesh's size.
-    if (this._bgMesh && this._bgMesh.material) {
-      this._fitTextureCover(this._bgMesh.material.map, this._bgWidth, this._bgHeight);
+    if (this._bgMesh && this._bgMesh.material && this._bgMesh.material.map === tex) {
+      this._fitTextureCover(tex, this._bgWidth, this._bgHeight);
     }
     // scene.background path (attachBackground): re-fit against the live canvas.
-    if (this._bgScene && this._bgScene.background) {
+    if (this._bgScene && this._bgScene.background === tex) {
       const size = this._canvasSize();
-      this._fitTextureCover(this._bgScene.background, size.w, size.h);
+      this._fitTextureCover(tex, size.w, size.h);
     }
   }
 }
@@ -4273,6 +4361,10 @@ window.toggleDebug = toggleDebug;
 
 // Canvas discovery
 window.setPhoneCanvas = setPhoneCanvas;
+
+// Device detection (set once at load, like p5-phone)
+window.isMobile = _isMobileDevice();
+window.isDesktop = !window.isMobile;
 
 // Gesture locking
 window.lockGestures = lockGestures;

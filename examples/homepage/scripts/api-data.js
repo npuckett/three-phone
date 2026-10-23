@@ -93,6 +93,7 @@ window.THREEPHONE_API_SECTIONS = [
       { name: 'enableCameraTap', signature: 'enableCameraTap(message)', summary: 'Request camera permission and start any created PhoneCameras.', tags: ['tap', 'camera'] },
       { name: 'cam.getTexture', signature: 'cam.getTexture()', summary: 'A lazily-created THREE.VideoTexture of the feed (sRGB).', tags: ['camera'] },
       { name: 'cam.createBackgroundMesh', signature: 'cam.createBackgroundMesh(width?, height?)', summary: 'A screen-filling plane with the camera texture for an ortho overlay. Call cam.updateBackground() on resize.', tags: ['camera'] },
+      { name: 'cam.active', signature: "cam.active = 'environment'", summary: "Switch cameras at any time. Backgrounds from attachBackground() / createBackgroundMesh() follow the new feed. onReady is one-shot and is not re-fired, so call cam.onReady(cb) again to restart anything holding the old cam.videoElement.", tags: ['camera'] },
       { name: 'cam.mapKeypoints', signature: 'cam.mapKeypoints(keypoints)', summary: 'Map ml5 keypoints from video space to canvas coordinates (mirror-aware). Also mapPoint / mapKeypoint / mapBox(es).', tags: ['camera', 'ml5'] }
     ]
   },
@@ -208,7 +209,8 @@ window.THREEPHONE_API_SECTIONS = [
     relatedApis: [],
     items: [
       { name: 'window.sensorsEnabled', signature: 'if (window.sensorsEnabled) { ... }', summary: 'Also micEnabled, soundEnabled, speechEnabled, vibrationEnabled, torchEnabled, nfcEnabled, geoEnabled, cameraEnabled, bleConnected, gesturesLocked.', tags: ['status'] },
-      { name: 'permissionsReady', signature: "addEventListener('permissionsReady', e => ...)", summary: 'A window CustomEvent dispatched after any permission succeeds; detail carries every flag.', tags: ['status', 'callback'] }
+      { name: 'permissionsReady', signature: "addEventListener('permissionsReady', e => ...)", summary: 'A window CustomEvent dispatched after any permission succeeds; detail carries every flag.', tags: ['status', 'callback'] },
+      { name: 'window.isMobile / window.isDesktop', signature: "createPhoneCamera(isMobile ? 'environment' : 'user')", summary: 'Device detection set once at load, same checks as p5-phone: mobile user agent, iPadOS (Mac user agent with touch), coarse pointer, or touch with no fine pointer. isDesktop is !isMobile.', tags: ['status'] }
     ]
   }
 ];

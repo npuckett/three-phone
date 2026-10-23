@@ -76,6 +76,12 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 
 ## Per-feature cheatsheet
 
+**Device detection** → `window.isMobile` / `window.isDesktop`: booleans set once at load, with
+the same checks as p5-phone (mobile user agent, iPadOS's Mac user agent with touch, a coarse
+pointer, or touch without a fine pointer). Pick the camera with
+`createPhoneCamera(isMobile ? 'environment' : 'user', !isMobile, 'cover')`. Gate hardware on the
+`*Enabled` flags, not on `isMobile`.
+
 **Motion** → `enableGyroTap()`; then `rotationX/Y/Z` (deg), `accelerationX/Y/Z` (m/s²),
 `rotationRateAlpha/Beta/Gamma` (deg/s), `deviceOrientation`. Callbacks `deviceMoved()`,
 `deviceShaken()`; `setMoveThreshold(0.5)`, `setShakeThreshold(30)`. three.js helpers:
@@ -93,6 +99,10 @@ Vibration, Torch (Flashlight), Nfc, Geo, Ble, Camera, All, Permissions/Hardware*
 `cam.onReady(cb)`, `cam.getTexture()`, `cam.createBackgroundMesh()`, `cam.mapKeypoints(kps)`
 (video→canvas coords for ml5), `cam.videoElement` (feed ml5). Init is deferred to the gesture.
 No p5 here, so ml5 v1 constructors return a Promise: `model = await ml5.handPose(opts)`.
+Switch with `cam.active = 'environment'`; `attachBackground`/`createBackgroundMesh` backgrounds
+follow the new feed. `onReady` is one-shot and is not re-fired by a switch (as in p5-phone), so
+call `cam.onReady(cb)` again to restart anything holding the old `cam.videoElement` (e.g. ml5
+`detectStart`).
 
 **AR (magic window)** (iOS + Android) → `cam = createPhoneCamera('environment', false, 'cover')`,
 `cam.onReady(() => cam.attachBackground(scene))` (camera feed → `scene.background`),
@@ -146,3 +156,5 @@ route to global `touchStarted()`. `isXRSupported()` → `Promise<boolean>`; `end
   so it no-ops. Always call it inside the `onReady` callback.
 - Forgetting `cam.updateBackground()` in the resize handler — the magic-window background stops
   cover-fitting the canvas.
+- Writing your own phone check (user-agent sniffing) to choose the camera — use
+  `window.isMobile`, which also catches iPadOS's Mac user agent.

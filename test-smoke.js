@@ -105,6 +105,8 @@ const statusGlobals = ['sensorsEnabled', 'micEnabled', 'soundEnabled', 'gestures
   'vibrationEnabled', 'speechEnabled', 'nfcEnabled', 'cameraEnabled', 'torchEnabled',
   'bleSupported', 'bleConnected', 'bleValues', 'geoEnabled', 'lastGeoPosition',
   'micLevel', 'THREE_PHONE_VERSION',
+  // Device detection
+  'isMobile', 'isDesktop',
   // AR / WebXR status
   'arEnabled', 'xrSupported', 'xrEnabled', 'xrActive',
   // Motion + touch data globals
